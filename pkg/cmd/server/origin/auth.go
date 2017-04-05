@@ -17,12 +17,13 @@ import (
 
 	kapi "k8s.io/kubernetes/pkg/api"
 	kerrs "k8s.io/kubernetes/pkg/api/errors"
+	"k8s.io/kubernetes/pkg/auth/authenticator"
 	kuser "k8s.io/kubernetes/pkg/auth/user"
 	"k8s.io/kubernetes/pkg/client/retry"
 	knet "k8s.io/kubernetes/pkg/util/net"
 	"k8s.io/kubernetes/pkg/util/sets"
+	"k8s.io/kubernetes/plugin/pkg/auth/authenticator/request/union"
 
-	"github.com/openshift/origin/pkg/auth/authenticator"
 	"github.com/openshift/origin/pkg/auth/authenticator/challenger/passwordchallenger"
 	"github.com/openshift/origin/pkg/auth/authenticator/challenger/placeholderchallenger"
 	"github.com/openshift/origin/pkg/auth/authenticator/password/allowanypassword"
@@ -34,7 +35,6 @@ import (
 	"github.com/openshift/origin/pkg/auth/authenticator/redirector"
 	"github.com/openshift/origin/pkg/auth/authenticator/request/basicauthrequest"
 	"github.com/openshift/origin/pkg/auth/authenticator/request/headerrequest"
-	"github.com/openshift/origin/pkg/auth/authenticator/request/unionrequest"
 	"github.com/openshift/origin/pkg/auth/authenticator/request/x509request"
 	"github.com/openshift/origin/pkg/auth/ldaputil"
 	"github.com/openshift/origin/pkg/auth/oauth/external"
@@ -70,7 +70,7 @@ import (
 const (
 	OpenShiftOAuthAPIPrefix      = "/oauth"
 	openShiftLoginPrefix         = "/login"
-	OpenShiftApprovePrefix       = "/oauth/approve"
+	openShiftApproveSubpath      = "approve"
 	OpenShiftOAuthCallbackPrefix = "/oauth2callback"
 	OpenShiftWebConsoleClientID  = "openshift-web-console"
 	OpenShiftBrowserClientID     = "openshift-browser-client"
@@ -359,11 +359,13 @@ func (c *AuthConfig) getGrantHandler(mux cmdutil.Mux, auth authenticator.Request
 	// Since any OAuth client could require prompting, we will unconditionally
 	// start the GrantServer here.
 	grantServer := grant.NewGrant(c.getCSRF(), auth, grant.DefaultFormRenderer, clientregistry, authregistry)
-	grantServer.Install(mux, OpenShiftApprovePrefix)
+	grantServer.Install(mux, path.Join(OpenShiftOAuthAPIPrefix, osinserver.AuthorizePath, openShiftApproveSubpath))
 
 	// Set defaults for standard clients. These can be overridden.
-	return handlers.NewPerClientGrant(handlers.NewRedirectGrant(OpenShiftApprovePrefix),
-		oauthapi.GrantHandlerType(c.Options.GrantConfig.Method))
+	return handlers.NewPerClientGrant(
+		handlers.NewRedirectGrant(openShiftApproveSubpath),
+		oauthapi.GrantHandlerType(c.Options.GrantConfig.Method),
+	)
 }
 
 // getAuthenticationFinalizer returns an authentication finalizer which is called just prior to writing a response to an authorization request
@@ -739,7 +741,7 @@ func (c *AuthConfig) getAuthenticationRequestHandler() (authenticator.Request, e
 		}
 	}
 
-	authRequestHandler := unionrequest.NewUnionAuthentication(authRequestHandlers...)
+	authRequestHandler := union.New(authRequestHandlers...)
 	return authRequestHandler, nil
 }
 

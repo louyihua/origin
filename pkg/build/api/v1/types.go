@@ -103,6 +103,14 @@ type BuildTriggerCause struct {
 	// imageChangeBuild stores information about an imagechange event
 	// that triggered a new build.
 	ImageChangeBuild *ImageChangeCause `json:"imageChangeBuild,omitempty" protobuf:"bytes,4,opt,name=imageChangeBuild"`
+
+	// GitLabWebHook represents data for a GitLab webhook that fired a specific
+	// build.
+	GitLabWebHook *GitLabWebHookCause `json:"gitlabWebHook,omitempty" protobuf:"bytes,5,opt,name=gitlabWebHook"`
+
+	// BitbucketWebHook represents data for a Bitbucket webhook that fired a
+	// specific build.
+	BitbucketWebHook *BitbucketWebHookCause `json:"bitbucketWebHook,omitempty" protobuf:"bytes,6,opt,name=bitbucketWebHook"`
 }
 
 // GenericWebHookCause holds information about a generic WebHook that
@@ -124,6 +132,29 @@ type GitHubWebHookCause struct {
 
 	// secret is the obfuscated webhook secret that triggered a build.
 	Secret string `json:"secret,omitempty" protobuf:"bytes,2,opt,name=secret"`
+}
+
+// CommonWebHookCause factors out the identical format of these webhook
+// causes into struct so we can share it in the specific causes;  it is too late for
+// GitHub and Generic but we can leverage this pattern with GitLab and Bitbucket.
+type CommonWebHookCause struct {
+	// Revision is the git source revision information of the trigger.
+	Revision *SourceRevision `json:"revision,omitempty" protobuf:"bytes,1,opt,name=revision"`
+
+	// Secret is the obfuscated webhook secret that triggered a build.
+	Secret string `json:"secret,omitempty" protobuf:"bytes,2,opt,name=secret"`
+}
+
+// GitLabWebHookCause has information about a GitLab webhook that triggered a
+// build.
+type GitLabWebHookCause struct {
+	CommonWebHookCause `json:",inline" protobuf:"bytes,1,opt,name=commonSpec"`
+}
+
+// BitbucketWebHookCause has information about a Bitbucket webhook that triggered a
+// build.
+type BitbucketWebHookCause struct {
+	CommonWebHookCause `json:",inline" protobuf:"bytes,1,opt,name=commonSpec"`
 }
 
 // ImageChangeCause contains information about the image that triggered a
@@ -481,6 +512,27 @@ type CustomBuildStrategy struct {
 	BuildAPIVersion string `json:"buildAPIVersion,omitempty" protobuf:"bytes,7,opt,name=buildAPIVersion"`
 }
 
+// ImageOptimizationPolicy describes what optimizations the builder can perform when building images.
+type ImageOptimizationPolicy string
+
+const (
+	// ImageOptimizationNone will generate a canonical Docker image as produced by the
+	// `docker build` command.
+	ImageOptimizationNone ImageOptimizationPolicy = "None"
+
+	// ImageOptimizationSkipLayers is an experimental policy and will avoid creating
+	// unique layers for each dockerfile line, resulting in smaller images and saving time
+	// during creation. Some Dockerfile syntax is not fully supported - content added to
+	// a VOLUME by an earlier layer may have incorrect uid, gid, and filesystem permissions.
+	// If an unsupported setting is detected, the build will fail.
+	ImageOptimizationSkipLayers ImageOptimizationPolicy = "SkipLayers"
+
+	// ImageOptimizationSkipLayersAndWarn is the same as SkipLayers, but will only
+	// warn to the build output instead of failing when unsupported syntax is detected. This
+	// policy is experimental.
+	ImageOptimizationSkipLayersAndWarn ImageOptimizationPolicy = "SkipLayersAndWarn"
+)
+
 // DockerBuildStrategy defines input parameters specific to Docker build.
 type DockerBuildStrategy struct {
 	// from is reference to an DockerImage, ImageStreamTag, or ImageStreamImage from which
@@ -508,9 +560,18 @@ type DockerBuildStrategy struct {
 	// relative to the root of the context (contextDir).
 	DockerfilePath string `json:"dockerfilePath,omitempty" protobuf:"bytes,6,opt,name=dockerfilePath"`
 
-	// Args contains any build arguments that are to be passed to Docker.  See
-	// https://docs.docker.com/engine/reference/builder/#/arg for more details
+	// buildArgs contains build arguments that will be resolved in the Dockerfile.  See
+	// https://docs.docker.com/engine/reference/builder/#/arg for more details.
 	BuildArgs []kapi.EnvVar `json:"buildArgs,omitempty" protobuf:"bytes,7,rep,name=buildArgs"`
+
+	// imageOptimizationPolicy describes what optimizations the system can use when building images
+	// to reduce the final size or time spent building the image. The default policy is 'None' which
+	// means the final build image will be equivalent to an image created by the Docker build API.
+	// The experimental policy 'SkipLayers' will avoid commiting new layers in between each
+	// image step, and will fail if the Dockerfile cannot provide compatibility with the 'None'
+	// policy. An additional experimental policy 'SkipLayersAndWarn' is the same as
+	// 'SkipLayers' but simply warns if compatibility cannot be preserved.
+	ImageOptimizationPolicy *ImageOptimizationPolicy `json:"imageOptimizationPolicy,omitempty" protobuf:"bytes,8,opt,name=imageOptimizationPolicy,casttype=ImageOptimizationPolicy"`
 }
 
 // SourceBuildStrategy defines input parameters specific to an Source build.
@@ -780,6 +841,13 @@ type BuildTriggerPolicy struct {
 
 	// imageChange contains parameters for an ImageChange type of trigger
 	ImageChange *ImageChangeTrigger `json:"imageChange,omitempty" protobuf:"bytes,4,opt,name=imageChange"`
+
+	// GitLabWebHook contains the parameters for a GitLab webhook type of trigger
+	GitLabWebHook *WebHookTrigger `json:"gitlab,omitempty" protobuf:"bytes,5,opt,name=gitlab"`
+
+	// BitbucketWebHook contains the parameters for a Bitbucket webhook type of
+	// trigger
+	BitbucketWebHook *WebHookTrigger `json:"bitbucket,omitempty" protobuf:"bytes,6,opt,name=bitbucket"`
 }
 
 // BuildTriggerType refers to a specific BuildTriggerPolicy implementation.
@@ -795,6 +863,14 @@ const (
 	// generic webhook invocations
 	GenericWebHookBuildTriggerType           BuildTriggerType = "Generic"
 	GenericWebHookBuildTriggerTypeDeprecated BuildTriggerType = "generic"
+
+	// GitLabWebHookBuildTriggerType represents a trigger that launches builds on
+	// GitLab webhook invocations
+	GitLabWebHookBuildTriggerType BuildTriggerType = "GitLab"
+
+	// BitbucketWebHookBuildTriggerType represents a trigger that launches builds on
+	// Bitbucket webhook invocations
+	BitbucketWebHookBuildTriggerType BuildTriggerType = "Bitbucket"
 
 	// ImageChangeBuildTriggerType represents a trigger that launches builds on
 	// availability of a new version of an image

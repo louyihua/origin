@@ -23225,6 +23225,14 @@
      "imageChange": {
       "$ref": "v1.ImageChangeTrigger",
       "description": "imageChange contains parameters for an ImageChange type of trigger"
+     },
+     "gitlab": {
+      "$ref": "v1.WebHookTrigger",
+      "description": "GitLabWebHook contains the parameters for a GitLab webhook type of trigger"
+     },
+     "bitbucket": {
+      "$ref": "v1.WebHookTrigger",
+      "description": "BitbucketWebHook contains the parameters for a Bitbucket webhook type of trigger"
      }
     }
    },
@@ -23564,7 +23572,11 @@
       "items": {
        "$ref": "v1.EnvVar"
       },
-      "description": "Args contains any build arguments that are to be passed to Docker.  See https://docs.docker.com/engine/reference/builder/#/arg for more details"
+      "description": "buildArgs contains build arguments that will be resolved in the Dockerfile.  See https://docs.docker.com/engine/reference/builder/#/arg for more details."
+     },
+     "imageOptimizationPolicy": {
+      "$ref": "v1.ImageOptimizationPolicy",
+      "description": "imageOptimizationPolicy describes what optimizations the system can use when building images to reduce the final size or time spent building the image. The default policy is 'None' which means the final build image will be equivalent to an image created by the Docker build API. The experimental policy 'SkipLayers' will avoid commiting new layers in between each image step, and will fail if the Dockerfile cannot provide compatibility with the 'None' policy. An additional experimental policy 'SkipLayersAndWarn' is the same as 'SkipLayers' but simply warns if compatibility cannot be preserved."
      }
     }
    },
@@ -23682,6 +23694,10 @@
       "description": "The key of the secret to select from.  Must be a valid secret key."
      }
     }
+   },
+   "v1.ImageOptimizationPolicy": {
+    "id": "v1.ImageOptimizationPolicy",
+    "properties": {}
    },
    "v1.SourceBuildStrategy": {
     "id": "v1.SourceBuildStrategy",
@@ -24129,6 +24145,14 @@
      "imageChangeBuild": {
       "$ref": "v1.ImageChangeCause",
       "description": "imageChangeBuild stores information about an imagechange event that triggered a new build."
+     },
+     "gitlabWebHook": {
+      "$ref": "v1.GitLabWebHookCause",
+      "description": "GitLabWebHook represents data for a GitLab webhook that fired a specific build."
+     },
+     "bitbucketWebHook": {
+      "$ref": "v1.BitbucketWebHookCause",
+      "description": "BitbucketWebHook represents data for a Bitbucket webhook that fired a specific build."
      }
     }
    },
@@ -24171,6 +24195,34 @@
      "fromRef": {
       "$ref": "v1.ObjectReference",
       "description": "fromRef contains detailed information about an image that triggered a build."
+     }
+    }
+   },
+   "v1.GitLabWebHookCause": {
+    "id": "v1.GitLabWebHookCause",
+    "description": "GitLabWebHookCause has information about a GitLab webhook that triggered a build.",
+    "properties": {
+     "revision": {
+      "$ref": "v1.SourceRevision",
+      "description": "Revision is the git source revision information of the trigger."
+     },
+     "secret": {
+      "type": "string",
+      "description": "Secret is the obfuscated webhook secret that triggered a build."
+     }
+    }
+   },
+   "v1.BitbucketWebHookCause": {
+    "id": "v1.BitbucketWebHookCause",
+    "description": "BitbucketWebHookCause has information about a Bitbucket webhook that triggered a build.",
+    "properties": {
+     "revision": {
+      "$ref": "v1.SourceRevision",
+      "description": "Revision is the git source revision information of the trigger."
+     },
+     "secret": {
+      "type": "string",
+      "description": "Secret is the obfuscated webhook secret that triggered a build."
      }
     }
    },
@@ -27410,6 +27462,10 @@
       "$ref": "v1.TagImportPolicy",
       "description": "ImportPolicy is the policy controlling how the image is imported"
      },
+     "referencePolicy": {
+      "$ref": "v1.TagReferencePolicy",
+      "description": "ReferencePolicy defines how other components should consume the image"
+     },
      "includeManifest": {
       "type": "boolean",
       "description": "IncludeManifest determines if the manifest for each image is returned in the response"
@@ -27427,6 +27483,19 @@
      "scheduled": {
       "type": "boolean",
       "description": "Scheduled indicates to the server that this tag should be periodically checked to ensure it is up to date, and imported"
+     }
+    }
+   },
+   "v1.TagReferencePolicy": {
+    "id": "v1.TagReferencePolicy",
+    "description": "TagReferencePolicy describes how pull-specs for images in this image stream tag are generated when image change triggers in deployment configs or builds are resolved. This allows the image stream author to control how images are accessed.",
+    "required": [
+     "type"
+    ],
+    "properties": {
+     "type": {
+      "type": "string",
+      "description": "Type determines how the image pull spec should be transformed when the image stream tag is used in deployment config triggers or new builds. The default value is `Source`, indicating the original location of the image should be used (if imported). The user may also specify `Local`, indicating that the pull spec should point to the integrated Docker registry and leverage the registry's ability to proxy the pull to an upstream registry. `Local` allows the credentials used to pull this image to be managed from the image stream's namespace, so others on the platform can access a remote image but have no access to the remote secret. It also allows the image layers to be mirrored into the local registry which the images can still be pulled even if the upstream registry is unavailable."
      }
     }
    },
@@ -27448,6 +27517,10 @@
      "importPolicy": {
       "$ref": "v1.TagImportPolicy",
       "description": "ImportPolicy is the policy controlling how the image is imported"
+     },
+     "referencePolicy": {
+      "$ref": "v1.TagReferencePolicy",
+      "description": "ReferencePolicy defines how other components should consume the image"
      },
      "includeManifest": {
       "type": "boolean",
@@ -27559,19 +27632,6 @@
      "referencePolicy": {
       "$ref": "v1.TagReferencePolicy",
       "description": "ReferencePolicy defines how other components should consume the image"
-     }
-    }
-   },
-   "v1.TagReferencePolicy": {
-    "id": "v1.TagReferencePolicy",
-    "description": "TagReferencePolicy describes how pull-specs for images in this image stream tag are generated when image change triggers in deployment configs or builds are resolved. This allows the image stream author to control how images are accessed.",
-    "required": [
-     "type"
-    ],
-    "properties": {
-     "type": {
-      "type": "string",
-      "description": "Type determines how the image pull spec should be transformed when the image stream tag is used in deployment config triggers or new builds. The default value is `Source`, indicating the original location of the image should be used (if imported). The user may also specify `Local`, indicating that the pull spec should point to the integrated Docker registry and leverage the registry's ability to proxy the pull to an upstream registry. `Local` allows the credentials used to pull this image to be managed from the image stream's namespace, so others on the platform can access a remote image but have no access to the remote secret. It also allows the image layers to be mirrored into the local registry which the images can still be pulled even if the upstream registry is unavailable."
      }
     }
    },

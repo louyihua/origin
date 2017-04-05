@@ -6,9 +6,8 @@
 source "$(dirname "${BASH_SOURCE}")/../../hack/lib/init.sh"
 
 os::util::environment::use_sudo
-os::util::environment::setup_all_server_vars "test-extended-alternate-launches/"
-
-export EXTENDED_TEST_PATH="${OS_ROOT}/test/extended"
+os::cleanup::tmpdir
+os::util::environment::setup_all_server_vars
 
 function cleanup()
 {

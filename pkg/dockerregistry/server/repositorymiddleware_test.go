@@ -24,7 +24,6 @@ import (
 	"github.com/docker/libtrust"
 
 	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
 	"k8s.io/kubernetes/pkg/client/testing/core"
 	"k8s.io/kubernetes/pkg/util/diff"
 
@@ -39,6 +38,10 @@ const (
 	// testImageLayerCount says how many layers to generate per image
 	testImageLayerCount = 2
 )
+
+func init() {
+	log.SetLevel(log.DebugLevel)
+}
 
 func TestRepositoryBlobStat(t *testing.T) {
 	quotaEnforcing = &quotaEnforcingConfig{}
@@ -282,10 +285,10 @@ func TestRepositoryBlobStat(t *testing.T) {
 
 		ctx := context.Background()
 		if !tc.skipAuth {
-			ctx = WithAuthPerformed(ctx)
+			ctx = withAuthPerformed(ctx)
 		}
 		if tc.deferredErrors != nil {
-			ctx = WithDeferredErrors(ctx, tc.deferredErrors)
+			ctx = withDeferredErrors(ctx, tc.deferredErrors)
 		}
 
 		client := &testclient.Fake{}
@@ -326,11 +329,10 @@ func TestRepositoryBlobStat(t *testing.T) {
 }
 
 func TestRepositoryBlobStatCacheEviction(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
 	const blobRepoCacheTTL = time.Millisecond * 500
 
 	quotaEnforcing = &quotaEnforcingConfig{}
-	ctx := WithAuthPerformed(context.Background())
+	ctx := withAuthPerformed(context.Background())
 
 	// this driver holds all the testing blobs in memory during the whole test run
 	driver := inmemory.New()
@@ -711,8 +713,6 @@ func (reg *testRegistry) Repository(ctx context.Context, ref reference.Named) (d
 		return nil, err
 	}
 
-	kFakeClient := fake.NewSimpleClientset()
-
 	parts := strings.SplitN(ref.Name(), "/", 3)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("failed to parse repository name %q", ref.Name())
@@ -731,8 +731,7 @@ func (reg *testRegistry) Repository(ctx context.Context, ref reference.Named) (d
 		Repository: repo,
 
 		ctx:              ctx,
-		quotaClient:      kFakeClient.Core(),
-		limitClient:      kFakeClient.Core(),
+		limitClient:      nil,
 		registryOSClient: reg.osClient,
 		registryAddr:     "localhost:5000",
 		namespace:        nm,

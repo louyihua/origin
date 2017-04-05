@@ -18,7 +18,6 @@ import (
 	_ "github.com/docker/distribution/registry/storage/driver/inmemory"
 
 	kapi "k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
 	"k8s.io/kubernetes/pkg/client/testing/core"
 	"k8s.io/kubernetes/pkg/runtime"
 
@@ -30,15 +29,6 @@ import (
 
 func TestSignatureGet(t *testing.T) {
 	client := &testclient.Fake{}
-	// TODO: get rid of those nasty global vars
-	backupRegistryClient := DefaultRegistryClient
-	DefaultRegistryClient = makeFakeRegistryClient(client, fake.NewSimpleClientset())
-	defer func() {
-		// set it back once this test finishes to make other unit tests working again
-		DefaultRegistryClient = backupRegistryClient
-	}()
-
-	ctx := WithUserClient(context.Background(), client)
 
 	installFakeAccessController(t)
 
@@ -65,9 +55,11 @@ func TestSignatureGet(t *testing.T) {
 	}
 	testImageStream.Annotations[imageapi.InsecureRepositoryAnnotation] = "true"
 	client.AddReactor("get", "imagestreams", imagetest.GetFakeImageStreamGetHandler(t, *testImageStream))
-
 	client.AddReactor("get", "imagestreamimages", registrytest.GetFakeImageStreamImageGetHandler(t, testImageStream, *testImage))
 
+	ctx := context.Background()
+	ctx = WithRegistryClient(ctx, makeFakeRegistryClient(client, nil))
+	ctx = withUserClient(ctx, client)
 	registryApp := handlers.NewApp(ctx, &configuration.Configuration{
 		Loglevel: "debug",
 		Auth: map[string]configuration.Parameters{
@@ -80,6 +72,11 @@ func TestSignatureGet(t *testing.T) {
 			},
 			"delete": configuration.Parameters{
 				"enabled": true,
+			},
+			"maintenance": configuration.Parameters{
+				"uploadpurging": map[interface{}]interface{}{
+					"enabled": false,
+				},
 			},
 		},
 		Middleware: map[string][]configuration.Middleware{
@@ -143,15 +140,6 @@ func TestSignatureGet(t *testing.T) {
 
 func TestSignaturePut(t *testing.T) {
 	client := &testclient.Fake{}
-	// TODO: get rid of those nasty global vars
-	backupRegistryClient := DefaultRegistryClient
-	DefaultRegistryClient = makeFakeRegistryClient(client, fake.NewSimpleClientset())
-	defer func() {
-		// set it back once this test finishes to make other unit tests working again
-		DefaultRegistryClient = backupRegistryClient
-	}()
-
-	ctx := WithUserClient(context.Background(), client)
 
 	installFakeAccessController(t)
 
@@ -172,6 +160,9 @@ func TestSignaturePut(t *testing.T) {
 		return true, sign, nil
 	})
 
+	ctx := context.Background()
+	ctx = WithRegistryClient(ctx, makeFakeRegistryClient(client, nil))
+	ctx = withUserClient(ctx, client)
 	registryApp := handlers.NewApp(ctx, &configuration.Configuration{
 		Loglevel: "debug",
 		Auth: map[string]configuration.Parameters{
@@ -184,6 +175,11 @@ func TestSignaturePut(t *testing.T) {
 			},
 			"delete": configuration.Parameters{
 				"enabled": true,
+			},
+			"maintenance": configuration.Parameters{
+				"uploadpurging": map[interface{}]interface{}{
+					"enabled": false,
+				},
 			},
 		},
 		Middleware: map[string][]configuration.Middleware{

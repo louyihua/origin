@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/util/wait"
 
+	buildapi "github.com/openshift/origin/pkg/build/api"
 	exutil "github.com/openshift/origin/test/extended/util"
 )
 
@@ -390,4 +392,49 @@ func SetupSnapshotImage(envVarName, localImageName, snapshotImageStream string, 
 	}
 
 	return newAppArgs, useSnapshotImage
+}
+
+func ProcessLogURLAnnotations(oc *exutil.CLI, t *exutil.BuildResult) (*url.URL, error) {
+	if len(t.Build.Annotations[buildapi.BuildJenkinsLogURLAnnotation]) == 0 {
+		return nil, fmt.Errorf("build %s does not contain a Jenkins URL annotation", t.BuildName)
+	}
+	jenkinsLogURL, err := url.Parse(t.Build.Annotations[buildapi.BuildJenkinsLogURLAnnotation])
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse jenkins log URL (%s): %v", t.Build.Annotations[buildapi.BuildJenkinsLogURLAnnotation], err)
+	}
+	if len(t.Build.Annotations[buildapi.BuildJenkinsConsoleLogURLAnnotation]) == 0 {
+		return nil, fmt.Errorf("build %s does not contain a Jenkins Console URL annotation", t.BuildName)
+	}
+	_, err = url.Parse(t.Build.Annotations[buildapi.BuildJenkinsConsoleLogURLAnnotation])
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse jenkins console log URL (%s): %v", t.Build.Annotations[buildapi.BuildJenkinsConsoleLogURLAnnotation], err)
+	}
+	if len(t.Build.Annotations[buildapi.BuildJenkinsBlueOceanLogURLAnnotation]) == 0 {
+		return nil, fmt.Errorf("build %s does not contain a Jenkins BlueOcean URL annotation", t.BuildName)
+	}
+	_, err = url.Parse(t.Build.Annotations[buildapi.BuildJenkinsBlueOceanLogURLAnnotation])
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse jenkins log blueocean URL (%s): %v", t.Build.Annotations[buildapi.BuildJenkinsBlueOceanLogURLAnnotation], err)
+	}
+	return jenkinsLogURL, nil
+}
+
+func DumpLogs(oc *exutil.CLI, t *exutil.BuildResult) (string, error) {
+	var err error
+	if t.Build == nil {
+		t.Build, err = oc.Client().Builds(oc.Namespace()).Get(t.BuildName)
+		if err != nil {
+			return "", fmt.Errorf("cannot retrieve build %s: %v", t.BuildName, err)
+		}
+	}
+	jenkinsLogURL, err := ProcessLogURLAnnotations(oc, t)
+	if err != nil {
+		return "", err
+	}
+	jenkinsRef := NewRef(oc)
+	log, _, err := jenkinsRef.GetResource(jenkinsLogURL.Path)
+	if err != nil {
+		return "", fmt.Errorf("cannot get jenkins log: %v", err)
+	}
+	return log, nil
 }

@@ -29,9 +29,11 @@ import (
 	kclientcmd "k8s.io/kubernetes/pkg/client/unversioned/clientcmd"
 	"k8s.io/kubernetes/pkg/fields"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	"k8s.io/kubernetes/pkg/runtime"
 	"k8s.io/kubernetes/third_party/forked/golang/netutil"
 
 	buildapi "github.com/openshift/origin/pkg/build/api"
+	buildapiv1 "github.com/openshift/origin/pkg/build/api/v1"
 	osclient "github.com/openshift/origin/pkg/client"
 	"github.com/openshift/origin/pkg/cmd/templates"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
@@ -237,10 +239,10 @@ func (o *StartBuildOptions) Complete(f *clientcmd.Factory, in io.Reader, out, er
 		if err != nil {
 			return err
 		}
-		switch resource {
-		case buildapi.Resource("buildconfigs"):
+		switch {
+		case buildapi.IsResourceOrLegacy("buildconfigs", resource):
 			// no special handling required
-		case buildapi.Resource("builds"):
+		case buildapi.IsResourceOrLegacy("builds", resource):
 			if len(o.ListWebhooks) == 0 {
 				return fmt.Errorf("use --from-build to rerun your builds")
 			}
@@ -250,7 +252,7 @@ func (o *StartBuildOptions) Complete(f *clientcmd.Factory, in io.Reader, out, er
 	}
 
 	// when listing webhooks, allow --from-build to lookup a build config
-	if resource == buildapi.Resource("builds") && len(o.ListWebhooks) > 0 {
+	if buildapi.IsResourceOrLegacy("builds", resource) && len(o.ListWebhooks) > 0 {
 		build, err := client.Builds(namespace).Get(name)
 		if err != nil {
 			return err
@@ -711,6 +713,20 @@ func (o *StartBuildOptions) RunStartBuildWebHook() error {
 		body, _ := ioutil.ReadAll(resp.Body)
 		return fmt.Errorf("server rejected our request %d\nremote: %s", resp.StatusCode, string(body))
 	}
+
+	body, _ := ioutil.ReadAll(resp.Body)
+	if len(body) > 0 {
+		// In later server versions we return the created Build in the body.
+		var newBuild buildapi.Build
+		if err = json.Unmarshal(body, &buildapiv1.Build{}); err == nil {
+			if err = runtime.DecodeInto(kapi.Codecs.UniversalDecoder(), body, &newBuild); err != nil {
+				return err
+			}
+
+			kcmdutil.PrintSuccess(o.Mapper, o.ShortOutput, o.Out, "build", newBuild.Name, false, "started")
+		}
+	}
+
 	return nil
 }
 

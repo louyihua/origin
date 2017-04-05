@@ -23,8 +23,7 @@ import (
 	"github.com/docker/distribution/registry/storage"
 
 	registrytest "github.com/openshift/origin/pkg/dockerregistry/testutil"
-	kclientset "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
-	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
+	kcoreclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/core/internalversion"
 	"k8s.io/kubernetes/pkg/client/restclient"
 
 	osclient "github.com/openshift/origin/pkg/client"
@@ -47,8 +46,6 @@ func GetTestPassThroughToUpstream(ctx context.Context) bool {
 // It relies on the fact that blobDescriptorService requires higher levels to set repository object on given
 // context. If the object isn't given, its method will err out.
 func TestBlobDescriptorServiceIsApplied(t *testing.T) {
-	ctx := context.Background()
-
 	// don't do any authorization check
 	installFakeAccessController(t)
 	m := fakeBlobDescriptorService(t)
@@ -64,14 +61,8 @@ func TestBlobDescriptorServiceIsApplied(t *testing.T) {
 	client.AddReactor("get", "imagestreams", imagetest.GetFakeImageStreamGetHandler(t, *testImageStream))
 	client.AddReactor("get", "images", registrytest.GetFakeImageGetHandler(t, *testImage))
 
-	// TODO: get rid of those nasty global vars
-	backupRegistryClient := DefaultRegistryClient
-	DefaultRegistryClient = makeFakeRegistryClient(client, fake.NewSimpleClientset())
-	defer func() {
-		// set it back once this test finishes to make other unit tests working
-		DefaultRegistryClient = backupRegistryClient
-	}()
-
+	ctx := context.Background()
+	ctx = WithRegistryClient(ctx, makeFakeRegistryClient(client, nil))
 	app := handlers.NewApp(ctx, &configuration.Configuration{
 		Loglevel: "debug",
 		Auth: map[string]configuration.Parameters{
@@ -84,6 +75,11 @@ func TestBlobDescriptorServiceIsApplied(t *testing.T) {
 			},
 			"delete": configuration.Parameters{
 				"enabled": true,
+			},
+			"maintenance": configuration.Parameters{
+				"uploadpurging": map[interface{}]interface{}{
+					"enabled": false,
+				},
 			},
 		},
 		Middleware: map[string][]configuration.Middleware{
@@ -264,6 +260,33 @@ func TestBlobDescriptorServiceIsApplied(t *testing.T) {
 		},
 
 		{
+			name:     "delete manifest with repository unset",
+			method:   http.MethodDelete,
+			endpoint: v2.RouteNameManifest,
+			vars: []string{
+				"name", "user/app",
+				"reference", testImage.Name,
+			},
+			unsetRepository: true,
+			expectedStatus:  http.StatusInternalServerError,
+			// we don't allow to delete manifests from etcd; in this case, we attempt to delete layer link
+			expectedMethodInvocations: map[string]int{"Stat": 1},
+		},
+
+		{
+			name:     "delete manifest",
+			method:   http.MethodDelete,
+			endpoint: v2.RouteNameManifest,
+			vars: []string{
+				"name", "user/app",
+				"reference", testImage.Name,
+			},
+			expectedStatus: http.StatusNotFound,
+			// we don't allow to delete manifests from etcd; in this case, we attempt to delete layer link
+			expectedMethodInvocations: map[string]int{"Stat": 1},
+		},
+
+		{
 			name:     "get manifest with repository unset",
 			method:   http.MethodGet,
 			endpoint: v2.RouteNameManifest,
@@ -289,36 +312,6 @@ func TestBlobDescriptorServiceIsApplied(t *testing.T) {
 			expectedStatus: http.StatusOK,
 			// manifest is retrieved from etcd
 			expectedMethodInvocations: map[string]int{"Stat": 1},
-		},
-
-		{
-			name:     "delete manifest with repository unset",
-			method:   http.MethodDelete,
-			endpoint: v2.RouteNameManifest,
-			vars: []string{
-				"name", "user/app",
-				"reference", testImage.Name,
-			},
-			unsetRepository: true,
-			expectedStatus:  http.StatusInternalServerError,
-			// we don't allow to delete manifests from etcd; in this case, we attempt to delete layer link
-			expectedMethodInvocations: map[string]int{"Stat": 1},
-		},
-
-		{
-			name:     "delete manifest",
-			method:   http.MethodDelete,
-			endpoint: v2.RouteNameManifest,
-			vars: []string{
-				"name", "user/app",
-				"reference", testImage.Name,
-			},
-			expectedStatus: http.StatusAccepted,
-			// we don't allow to delete manifests from etcd; in this case, we attempt to delete layer link
-			expectedMethodInvocations: map[string]int{
-				"Stat":  1,
-				"Clear": 1,
-			},
 		},
 	} {
 		doTest(tc)
@@ -463,7 +456,7 @@ func (bs *testBlobDescriptorService) Stat(ctx context.Context, dgst digest.Diges
 	bs.m.methodInvoked("Stat")
 	if bs.m.getUnsetRepository() {
 		bs.t.Logf("unsetting repository from the context")
-		ctx = WithRepository(ctx, nil)
+		ctx = withRepository(ctx, nil)
 	}
 
 	return bs.BlobDescriptorService.Stat(ctx, dgst)
@@ -472,7 +465,7 @@ func (bs *testBlobDescriptorService) Clear(ctx context.Context, dgst digest.Dige
 	bs.m.methodInvoked("Clear")
 	if bs.m.getUnsetRepository() {
 		bs.t.Logf("unsetting repository from the context")
-		ctx = WithRepository(ctx, nil)
+		ctx = withRepository(ctx, nil)
 	}
 	return bs.BlobDescriptorService.Clear(ctx, dgst)
 }
@@ -499,24 +492,24 @@ func (f *fakeAccessController) Authorized(ctx context.Context, access ...registr
 		f.t.Logf("fake authorizer: authorizing access to %s:%s:%s", access.Resource.Type, access.Resource.Name, access.Action)
 	}
 
-	ctx = WithAuthPerformed(ctx)
+	ctx = withAuthPerformed(ctx)
 	return ctx, nil
 }
 
-func makeFakeRegistryClient(client osclient.Interface, kClient kclientset.Interface) RegistryClient {
+func makeFakeRegistryClient(client osclient.Interface, kCoreClient kcoreclient.CoreInterface) RegistryClient {
 	return &fakeRegistryClient{
-		client:  client,
-		kClient: kClient,
+		client:      client,
+		kCoreClient: kCoreClient,
 	}
 }
 
 type fakeRegistryClient struct {
-	client  osclient.Interface
-	kClient kclientset.Interface
+	client      osclient.Interface
+	kCoreClient kcoreclient.CoreInterface
 }
 
-func (f *fakeRegistryClient) Clients() (osclient.Interface, kclientset.Interface, error) {
-	return f.client, f.kClient, nil
+func (f *fakeRegistryClient) Clients() (osclient.Interface, kcoreclient.CoreInterface, error) {
+	return f.client, f.kCoreClient, nil
 }
 func (f *fakeRegistryClient) SafeClientConfig() restclient.Config {
 	return (&registryClient{}).SafeClientConfig()

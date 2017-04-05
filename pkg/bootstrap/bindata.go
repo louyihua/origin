@@ -878,7 +878,7 @@ var _examplesImageStreamsImageStreamsCentos7Json = []byte(`{
               "openshift.io/display-name": "Jenkins 1.X",
               "description": "Provides a Jenkins 1.X server on CentOS 7. For more information about using this container image, including OpenShift considerations, see https://github.com/openshift/jenkins/blob/master/README.md.",
               "iconClass": "icon-jenkins",
-              "tags": "jenkins",
+              "tags": "hidden,jenkins",
               "version": "1.x"
             },
             "from": {
@@ -1631,7 +1631,7 @@ var _examplesImageStreamsImageStreamsRhel7Json = []byte(`{
               "openshift.io/display-name": "Jenkins 1.X",
               "description": "Provides a Jenkins 1.X server on RHEL 7. For more information about using this container image, including OpenShift considerations, see https://github.com/openshift/jenkins/blob/master/README.md.",
               "iconClass": "icon-jenkins",
-              "tags": "jenkins",
+              "tags": "hidden,jenkins",
               "version": "1.x"
             },
             "from": {
@@ -3878,6 +3878,16 @@ var _examplesDbTemplatesRedisEphemeralTemplateJson = []byte(`{
   },
   "objects": [
     {
+      "kind": "Secret",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "${DATABASE_SERVICE_NAME}"
+      },
+      "stringData" : {
+        "database-password" : "${REDIS_PASSWORD}"
+      }
+    },
+    {
       "kind": "Service",
       "apiVersion": "v1",
       "metadata": {
@@ -3974,7 +3984,12 @@ var _examplesDbTemplatesRedisEphemeralTemplateJson = []byte(`{
                 "env": [
                   {
                     "name": "REDIS_PASSWORD",
-                    "value": "${REDIS_PASSWORD}"
+                    "valueFrom": {
+                      "secretKeyRef" : {
+                        "name" : "${DATABASE_SERVICE_NAME}",
+                        "key" : "database-password"
+                      }
+                    }
                   }
                 ],
                 "resources": {
@@ -4091,6 +4106,16 @@ var _examplesDbTemplatesRedisPersistentTemplateJson = []byte(`{
   },
   "objects": [
     {
+      "kind": "Secret",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "${DATABASE_SERVICE_NAME}"
+      },
+      "stringData" : {
+        "database-password" : "${REDIS_PASSWORD}"
+      }
+    },
+    {
       "kind": "Service",
       "apiVersion": "v1",
       "metadata": {
@@ -4204,7 +4229,12 @@ var _examplesDbTemplatesRedisPersistentTemplateJson = []byte(`{
                 "env": [
                   {
                     "name": "REDIS_PASSWORD",
-                    "value": "${REDIS_PASSWORD}"
+                    "valueFrom": {
+                      "secretKeyRef" : {
+                        "name" : "${DATABASE_SERVICE_NAME}",
+                        "key" : "database-password"
+                      }
+                    }
                   }
                 ],
                 "resources": {
@@ -4973,6 +5003,7 @@ objects:
           def project=""
           def tag="blue"
           def altTag="green"
+          def verbose="${VERBOSE}"
 
           node {
             project = env.PROJECT_NAME
@@ -4989,12 +5020,12 @@ objects:
 
             stage("Build") {
               echo "building tag ${tag}"
-              openshiftBuild buildConfig: appName, showBuildLogs: "true"
+              openshiftBuild buildConfig: appName, showBuildLogs: "true", verbose: verbose
             }
 
             stage("Deploy Test") {
-              openshiftTag srcStream: appName, srcTag: 'latest', destinationStream: appName, destinationTag: tag
-              openshiftVerifyDeployment deploymentConfig: "${appName}-${tag}"
+              openshiftTag srcStream: appName, srcTag: 'latest', destinationStream: appName, destinationTag: tag, verbose: verbose
+              openshiftVerifyDeployment deploymentConfig: "${appName}-${tag}", verbose: verbose
             }
 
             stage("Test") {
@@ -5383,6 +5414,11 @@ parameters:
   name: NAMESPACE
   required: true
   value: openshift
+- description: Whether to enable verbose logging of Jenkinsfile steps in pipeline
+  displayName: Verbose
+  name: VERBOSE
+  required: true
+  value: "false"
 `)
 
 func examplesJenkinsPipelineBluegreenPipelineYamlBytes() ([]byte, error) {

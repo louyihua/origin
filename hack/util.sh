@@ -46,10 +46,10 @@ function cleanup_openshift() {
 	# really have it smack people in their logs.  This is a severe correctness problem
 	grep -a5 "CACHE.*ALTERED" ${LOG_DIR}/openshift.log
 
-	os::cleanup::dump_etcd
 	os::cleanup::dump_container_logs
 
 	if [[ -z "${SKIP_TEARDOWN-}" ]]; then
+		os::cleanup::dump_etcd
 		os::log::info "Tearing down test"
 		kill_all_processes
 
@@ -86,6 +86,7 @@ function find_files() {
 		-o -wholename './pkg/assets/*/bindata.go' \
 		-o -wholename './pkg/bootstrap/bindata.go' \
 		-o -wholename './openshift.local.*' \
+		-o -wholename './test/extended/testdata/bindata.go' \
 		-o -wholename '*/vendor/*' \
 		-o -wholename './assets/bower_components/*' \
 		\) -prune \

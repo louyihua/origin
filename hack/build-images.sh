@@ -15,17 +15,19 @@ if [[ "${OS_RELEASE:-}" == "n" ]]; then
 	imagedir="${OS_OUTPUT_BINPATH}/linux/amd64"
 	# identical to build-cross.sh
 	os::build::os_version_vars
-	OS_RELEASE_COMMIT="${OS_GIT_VERSION//+/-}"
-	platform="$(os::build::host_platform)"
-	OS_BUILD_PLATFORMS=("${OS_IMAGE_COMPILE_PLATFORMS[@]:-${platform}}")
-	OS_IMAGE_COMPILE_TARGETS=("${OS_IMAGE_COMPILE_TARGETS[@]:-${OS_IMAGE_COMPILE_TARGETS_LINUX[@]}}")
-	OS_SCRATCH_IMAGE_COMPILE_TARGETS=("${OS_SCRATCH_IMAGE_COMPILE_TARGETS[@]:-${OS_SCRATCH_IMAGE_COMPILE_TARGETS_LINUX[@]}}")
+	if [[ -z "${OS_RELEASE_LOCAL:-}" ]]; then
+		OS_RELEASE_COMMIT="${OS_GIT_VERSION//+/-}"
+		platform="$(os::build::host_platform)"
+		OS_BUILD_PLATFORMS=("${OS_IMAGE_COMPILE_PLATFORMS[@]:-${platform}}")
+		OS_IMAGE_COMPILE_TARGETS=("${OS_IMAGE_COMPILE_TARGETS[@]:-${OS_IMAGE_COMPILE_TARGETS_LINUX[@]}}")
+		OS_SCRATCH_IMAGE_COMPILE_TARGETS=("${OS_SCRATCH_IMAGE_COMPILE_TARGETS[@]:-${OS_SCRATCH_IMAGE_COMPILE_TARGETS_LINUX[@]}}")
 
-	echo "Building images from source ${OS_RELEASE_COMMIT}:"
-	echo
-	os::build::build_static_binaries "${OS_IMAGE_COMPILE_TARGETS[@]-}" "${OS_SCRATCH_IMAGE_COMPILE_TARGETS[@]-}"
-	os::build::place_bins "${OS_IMAGE_COMPILE_BINARIES[@]}"
-	echo
+		echo "Building images from source ${OS_RELEASE_COMMIT}:"
+		echo
+		os::build::build_static_binaries "${OS_IMAGE_COMPILE_TARGETS[@]-}" "${OS_SCRATCH_IMAGE_COMPILE_TARGETS[@]-}"
+		os::build::place_bins "${OS_IMAGE_COMPILE_BINARIES[@]}"
+		echo
+	fi
 else
 	# Get the latest Linux release
 	if [[ ! -d _output/local/releases ]]; then
@@ -64,8 +66,11 @@ function image-build() {
 	local tag=$1
 	local dir=$2
 	local dest="${tag}"
+	local extra=
 	if [[ ! "${tag}" == *":"* ]]; then
 		dest="${tag}:latest"
+		# tag to release commit unless we specified a hardcoded tag
+		extra="${tag}:${OS_RELEASE_COMMIT}"
 	fi
 
 	local STARTTIME
@@ -73,15 +78,13 @@ function image-build() {
 	STARTTIME="$(date +%s)"
 
 	# build the image
-	if ! os::build::image "${dir}" "${dest}"; then
+	if ! os::build::image "${dir}" "${dest}" "" "${extra}"; then
 		os::log::warning "Retrying build once"
-		os::build::image "${dir}" "${dest}"
+		if ! os::build::image "${dir}" "${dest}" "" "${extra}"; then
+			return 1
+		fi
 	fi
 
-	# tag to release commit unless we specified a hardcoded tag
-	if [[ ! "${tag}" == *":"* ]]; then
-		docker tag "${dest}" "${tag}:${OS_RELEASE_COMMIT}"
-	fi
 	# ensure the temporary contents are cleaned up
 	git clean -fdx "${dir}"
 
@@ -124,14 +127,12 @@ tag_prefix="${OS_IMAGE_PREFIX:-"openshift/origin"}"
 
 # images that depend on scratch / centos
 image "${tag_prefix}-pod"                   images/pod
-image openshift/openvswitch                 images/openvswitch
 # images that depend on "${tag_prefix}-base"
 image "${tag_prefix}"                       images/origin
 image "${tag_prefix}-haproxy-router"        images/router/haproxy
 image "${tag_prefix}-keepalived-ipfailover" images/ipfailover/keepalived
 image "${tag_prefix}-docker-registry"       images/dockerregistry
 image "${tag_prefix}-egress-router"         images/router/egress
-
 # images that depend on "${tag_prefix}
 image "${tag_prefix}-gitserver"             examples/gitserver
 image "${tag_prefix}-deployer"              images/deployer
@@ -139,21 +140,13 @@ image "${tag_prefix}-recycler"              images/recycler
 image "${tag_prefix}-docker-builder"        images/builder/docker/docker-builder
 image "${tag_prefix}-sti-builder"           images/builder/docker/sti-builder
 image "${tag_prefix}-f5-router"             images/router/f5
-image openshift/node                        images/node
+image "openshift/node"                      images/node
+# images that depend on "openshift/node"
+image "openshift/openvswitch"               images/openvswitch
 
 # extra images (not part of infrastructure)
-image openshift/hello-openshift       examples/hello-openshift
+image "openshift/hello-openshift"           examples/hello-openshift
 
-ln_or_cp "${imagedir}/deployment" examples/deployment/bin
-image openshift/deployment-example:v1 examples/deployment
-ln_or_cp "${imagedir}/deployment" examples/deployment/bin
-image openshift/deployment-example:v2 examples/deployment examples/deployment/Dockerfile.v2
-
-echo
-echo
-echo "++ Active images"
-
-docker images | grep openshift/ | grep ${OS_RELEASE_COMMIT} | sort
 echo
 
 ret=$?; ENDTIME=$(date +%s); echo "$0 took $(($ENDTIME - $STARTTIME)) seconds"; exit "$ret"

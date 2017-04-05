@@ -30,6 +30,14 @@ func (BinaryBuildSource) SwaggerDoc() map[string]string {
 	return map_BinaryBuildSource
 }
 
+var map_BitbucketWebHookCause = map[string]string{
+	"": "BitbucketWebHookCause has information about a Bitbucket webhook that triggered a build.",
+}
+
+func (BitbucketWebHookCause) SwaggerDoc() map[string]string {
+	return map_BitbucketWebHookCause
+}
+
 var map_Build = map[string]string{
 	"":         "Build encapsulates the inputs needed to produce a new deployable image, as well as the status of the execution and a reference to the Pod which executed the build.",
 	"metadata": "Standard object's metadata.",
@@ -236,6 +244,8 @@ var map_BuildTriggerCause = map[string]string{
 	"genericWebHook":   "genericWebHook holds data about a builds generic webhook trigger.",
 	"githubWebHook":    "gitHubWebHook represents data for a GitHub webhook that fired a specific build.",
 	"imageChangeBuild": "imageChangeBuild stores information about an imagechange event that triggered a new build.",
+	"gitlabWebHook":    "GitLabWebHook represents data for a GitLab webhook that fired a specific build.",
+	"bitbucketWebHook": "BitbucketWebHook represents data for a Bitbucket webhook that fired a specific build.",
 }
 
 func (BuildTriggerCause) SwaggerDoc() map[string]string {
@@ -248,6 +258,8 @@ var map_BuildTriggerPolicy = map[string]string{
 	"github":      "github contains the parameters for a GitHub webhook type of trigger",
 	"generic":     "generic contains the parameters for a Generic webhook type of trigger",
 	"imageChange": "imageChange contains parameters for an ImageChange type of trigger",
+	"gitlab":      "GitLabWebHook contains the parameters for a GitLab webhook type of trigger",
+	"bitbucket":   "BitbucketWebHook contains the parameters for a Bitbucket webhook type of trigger",
 }
 
 func (BuildTriggerPolicy) SwaggerDoc() map[string]string {
@@ -271,6 +283,16 @@ func (CommonSpec) SwaggerDoc() map[string]string {
 	return map_CommonSpec
 }
 
+var map_CommonWebHookCause = map[string]string{
+	"":         "CommonWebHookCause factors out the identical format of these webhook causes into struct so we can share it in the specific causes;  it is too late for GitHub and Generic but we can leverage this pattern with GitLab and Bitbucket.",
+	"revision": "Revision is the git source revision information of the trigger.",
+	"secret":   "Secret is the obfuscated webhook secret that triggered a build.",
+}
+
+func (CommonWebHookCause) SwaggerDoc() map[string]string {
+	return map_CommonWebHookCause
+}
+
 var map_CustomBuildStrategy = map[string]string{
 	"":                   "CustomBuildStrategy defines input parameters specific to Custom build.",
 	"from":               "from is reference to an DockerImage, ImageStreamTag, or ImageStreamImage from which the docker image should be pulled",
@@ -287,14 +309,15 @@ func (CustomBuildStrategy) SwaggerDoc() map[string]string {
 }
 
 var map_DockerBuildStrategy = map[string]string{
-	"":               "DockerBuildStrategy defines input parameters specific to Docker build.",
-	"from":           "from is reference to an DockerImage, ImageStreamTag, or ImageStreamImage from which the docker image should be pulled the resulting image will be used in the FROM line of the Dockerfile for this build.",
-	"pullSecret":     "pullSecret is the name of a Secret that would be used for setting up the authentication for pulling the Docker images from the private Docker registries",
-	"noCache":        "noCache if set to true indicates that the docker build must be executed with the --no-cache=true flag",
-	"env":            "env contains additional environment variables you want to pass into a builder container. ValueFrom is not supported.",
-	"forcePull":      "forcePull describes if the builder should pull the images from registry prior to building.",
-	"dockerfilePath": "dockerfilePath is the path of the Dockerfile that will be used to build the Docker image, relative to the root of the context (contextDir).",
-	"buildArgs":      "Args contains any build arguments that are to be passed to Docker.  See https://docs.docker.com/engine/reference/builder/#/arg for more details",
+	"":                        "DockerBuildStrategy defines input parameters specific to Docker build.",
+	"from":                    "from is reference to an DockerImage, ImageStreamTag, or ImageStreamImage from which the docker image should be pulled the resulting image will be used in the FROM line of the Dockerfile for this build.",
+	"pullSecret":              "pullSecret is the name of a Secret that would be used for setting up the authentication for pulling the Docker images from the private Docker registries",
+	"noCache":                 "noCache if set to true indicates that the docker build must be executed with the --no-cache=true flag",
+	"env":                     "env contains additional environment variables you want to pass into a builder container. ValueFrom is not supported.",
+	"forcePull":               "forcePull describes if the builder should pull the images from registry prior to building.",
+	"dockerfilePath":          "dockerfilePath is the path of the Dockerfile that will be used to build the Docker image, relative to the root of the context (contextDir).",
+	"buildArgs":               "buildArgs contains build arguments that will be resolved in the Dockerfile.  See https://docs.docker.com/engine/reference/builder/#/arg for more details.",
+	"imageOptimizationPolicy": "imageOptimizationPolicy describes what optimizations the system can use when building images to reduce the final size or time spent building the image. The default policy is 'None' which means the final build image will be equivalent to an image created by the Docker build API. The experimental policy 'SkipLayers' will avoid commiting new layers in between each image step, and will fail if the Dockerfile cannot provide compatibility with the 'None' policy. An additional experimental policy 'SkipLayersAndWarn' is the same as 'SkipLayers' but simply warns if compatibility cannot be preserved.",
 }
 
 func (DockerBuildStrategy) SwaggerDoc() map[string]string {
@@ -358,6 +381,14 @@ var map_GitInfo = map[string]string{
 
 func (GitInfo) SwaggerDoc() map[string]string {
 	return map_GitInfo
+}
+
+var map_GitLabWebHookCause = map[string]string{
+	"": "GitLabWebHookCause has information about a GitLab webhook that triggered a build.",
+}
+
+func (GitLabWebHookCause) SwaggerDoc() map[string]string {
+	return map_GitLabWebHookCause
 }
 
 var map_GitSourceRevision = map[string]string{

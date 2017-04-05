@@ -593,11 +593,13 @@ func isInvalidTriggerError(err error) bool {
 // type that is not in the whitelist for an older server.
 func retryBuildConfig(info *resource.Info, err error) runtime.Object {
 	triggerTypeWhiteList := map[buildapi.BuildTriggerType]struct{}{
-		buildapi.GitHubWebHookBuildTriggerType:  {},
-		buildapi.GenericWebHookBuildTriggerType: {},
-		buildapi.ImageChangeBuildTriggerType:    {},
+		buildapi.GitHubWebHookBuildTriggerType:    {},
+		buildapi.GenericWebHookBuildTriggerType:   {},
+		buildapi.ImageChangeBuildTriggerType:      {},
+		buildapi.GitLabWebHookBuildTriggerType:    {},
+		buildapi.BitbucketWebHookBuildTriggerType: {},
 	}
-	if info.Mapping.GroupVersionKind.GroupKind() == buildapi.Kind("BuildConfig") && isInvalidTriggerError(err) {
+	if buildapi.IsKindOrLegacy("BuildConfig", info.Mapping.GroupVersionKind.GroupKind()) && isInvalidTriggerError(err) {
 		bc, ok := info.Object.(*buildapi.BuildConfig)
 		if !ok {
 			return nil
@@ -633,8 +635,11 @@ func handleError(err error, baseName, commandName, commandPath string, config *n
 			fmt.Fprintf(buf, fmt.Sprintf("\n%s:  %v\n", classErr.Key, classErr.Value))
 		}
 		fmt.Fprint(buf, "\n")
+		// this print serves as a header for the printing of the errorGroups, but
+		// only print it if we precede with classification errors, to help distinguish
+		// between the two
+		fmt.Fprintln(buf, "Errors occurred during resource creation:")
 	}
-	fmt.Fprintln(buf, "Errors occurred during resource creation:")
 	for _, group := range groups {
 		fmt.Fprint(buf, kcmdutil.MultipleErrors("error: ", group.errs))
 		if len(group.suggestion) > 0 {

@@ -36,7 +36,7 @@ import (
 	userapi "github.com/openshift/origin/pkg/user/api"
 )
 
-func describerMap(c *client.Client, kclient kclientset.Interface, host string) map[unversioned.GroupKind]kctl.Describer {
+func describerMap(c *client.Client, kclient kclientset.Interface, host string, withCoreGroup bool) map[unversioned.GroupKind]kctl.Describer {
 	m := map[unversioned.GroupKind]kctl.Describer{
 		buildapi.Kind("Build"):                          &BuildDescriber{c, kclient},
 		buildapi.Kind("BuildConfig"):                    &BuildConfigDescriber{c, kclient, host},
@@ -69,6 +69,18 @@ func describerMap(c *client.Client, kclient kclientset.Interface, host string) m
 		sdnapi.Kind("EgressNetworkPolicy"):              &EgressNetworkPolicyDescriber{c},
 		authorizationapi.Kind("RoleBindingRestriction"): &RoleBindingRestrictionDescriber{c},
 	}
+
+	// Register the legacy ("core") API group for all kinds as well.
+	if withCoreGroup {
+		for _, t := range kapi.Scheme.KnownTypes(oapi.SchemeGroupVersion) {
+			coreKind := oapi.SchemeGroupVersion.WithKind(t.Name())
+			for g, d := range m {
+				if g.Kind == coreKind.Kind {
+					m[oapi.Kind(g.Kind)] = d
+				}
+			}
+		}
+	}
 	return m
 }
 
@@ -77,7 +89,7 @@ func DescribableResources() []string {
 	// Include describable resources in kubernetes
 	keys := kctl.DescribableResources()
 
-	for k := range describerMap(nil, nil, "") {
+	for k := range describerMap(nil, nil, "", false) {
 		resource := strings.ToLower(k.Kind)
 		keys = append(keys, resource)
 	}
@@ -86,7 +98,7 @@ func DescribableResources() []string {
 
 // DescriberFor returns a describer for a given kind of resource
 func DescriberFor(kind unversioned.GroupKind, c *client.Client, kclient kclientset.Interface, host string) (kctl.Describer, bool) {
-	f, ok := describerMap(c, kclient, host)[kind]
+	f, ok := describerMap(c, kclient, host, true)[kind]
 	if ok {
 		return f, true
 	}
@@ -393,7 +405,7 @@ func describeBuildTriggers(triggers []buildapi.BuildTriggerPolicy, name, namespa
 
 	for _, t := range triggers {
 		switch t.Type {
-		case buildapi.GitHubWebHookBuildTriggerType, buildapi.GenericWebHookBuildTriggerType:
+		case buildapi.GitHubWebHookBuildTriggerType, buildapi.GenericWebHookBuildTriggerType, buildapi.GitLabWebHookBuildTriggerType, buildapi.BitbucketWebHookBuildTriggerType:
 			continue
 		case buildapi.ConfigChangeBuildTriggerType:
 			labels = append(labels, "Config")
@@ -1453,6 +1465,14 @@ func describeBuildTriggerCauses(causes []buildapi.BuildTriggerCause, out *tabwri
 		case cause.GitHubWebHook != nil:
 			squashGitInfo(cause.GitHubWebHook.Revision, out)
 			formatString(out, "Secret", cause.GitHubWebHook.Secret)
+
+		case cause.GitLabWebHook != nil:
+			squashGitInfo(cause.GitLabWebHook.Revision, out)
+			formatString(out, "Secret", cause.GitLabWebHook.Secret)
+
+		case cause.BitbucketWebHook != nil:
+			squashGitInfo(cause.BitbucketWebHook.Revision, out)
+			formatString(out, "Secret", cause.BitbucketWebHook.Secret)
 
 		case cause.GenericWebHook != nil:
 			squashGitInfo(cause.GenericWebHook.Revision, out)

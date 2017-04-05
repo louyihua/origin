@@ -21,8 +21,12 @@ const (
 	BuildPodNameAnnotation = "openshift.io/build.pod-name"
 	// BuildJenkinsStatusJSONAnnotation is an annotation holding the Jenkins status information
 	BuildJenkinsStatusJSONAnnotation = "openshift.io/jenkins-status-json"
-	// BuildJenkinsLogURLAnnotation is an annotation holding a link to the Jenkins build console log
+	// BuildJenkinsLogURLAnnotation is an annotation holding a link to the raw Jenkins build console log
 	BuildJenkinsLogURLAnnotation = "openshift.io/jenkins-log-url"
+	// BuildJenkinsConsoleLogURLAnnotation is an annotation holding a link to the Jenkins build console log (including Jenkins chrome wrappering)
+	BuildJenkinsConsoleLogURLAnnotation = "openshift.io/jenkins-console-log-url"
+	// BuildJenkinsBlueOceanLogURLAnnotation is an annotation holding a link to the Jenkins build console log via the Jenkins BlueOcean UI Plugin
+	BuildJenkinsBlueOceanLogURLAnnotation = "openshift.io/jenkins-blueocean-log-url"
 	// BuildJenkinsBuildURIAnnotation is an annotation holding a link to the Jenkins build
 	BuildJenkinsBuildURIAnnotation = "openshift.io/jenkins-build-uri"
 	// BuildSourceSecretMatchURIAnnotationPrefix is a prefix for annotations on a Secret which indicate a source URI against which the Secret can be used
@@ -128,11 +132,13 @@ type CommonSpec struct {
 }
 
 const (
-	BuildTriggerCauseManualMsg  = "Manually triggered"
-	BuildTriggerCauseConfigMsg  = "Build configuration change"
-	BuildTriggerCauseImageMsg   = "Image change"
-	BuildTriggerCauseGithubMsg  = "GitHub WebHook"
-	BuildTriggerCauseGenericMsg = "Generic WebHook"
+	BuildTriggerCauseManualMsg    = "Manually triggered"
+	BuildTriggerCauseConfigMsg    = "Build configuration change"
+	BuildTriggerCauseImageMsg     = "Image change"
+	BuildTriggerCauseGithubMsg    = "GitHub WebHook"
+	BuildTriggerCauseGenericMsg   = "Generic WebHook"
+	BuildTriggerCauseGitLabMsg    = "GitLab WebHook"
+	BuildTriggerCauseBitbucketMsg = "Bitbucket WebHook"
 )
 
 // BuildTriggerCause holds information about a triggered build. It is used for
@@ -155,6 +161,14 @@ type BuildTriggerCause struct {
 	// ImageChangeBuild stores information about an imagechange event that
 	// triggered a new build.
 	ImageChangeBuild *ImageChangeCause
+
+	// GitLabWebHook represents data for a GitLab webhook that fired a specific
+	// build.
+	GitLabWebHook *GitLabWebHookCause
+
+	// BitbucketWebHook represents data for a Bitbucket webhook that fired a
+	// specific build.
+	BitbucketWebHook *BitbucketWebHookCause
 }
 
 // GenericWebHookCause holds information about a generic WebHook that
@@ -176,6 +190,29 @@ type GitHubWebHookCause struct {
 
 	// Secret is the obfuscated webhook secret that triggered a build.
 	Secret string
+}
+
+// CommonWebHookCause factors out the identical format of these webhook
+// causes into struct so we can share it in the specific causes;  it is too late for
+// GitHub and Generic but we can leverage this pattern with GitLab and Bitbucket.
+type CommonWebHookCause struct {
+	// Revision is the git source revision information of the trigger.
+	Revision *SourceRevision
+
+	// Secret is the obfuscated webhook secret that triggered a build.
+	Secret string
+}
+
+// GitLabWebHookCause has information about a GitLab webhook that triggered a
+// build.
+type GitLabWebHookCause struct {
+	CommonWebHookCause
+}
+
+// BitbucketWebHookCause has information about a Bitbucket webhook that triggered a
+// build.
+type BitbucketWebHookCause struct {
+	CommonWebHookCause
 }
 
 // ImageChangeCause contains information about the image that triggered a
@@ -327,6 +364,10 @@ const (
 	// StatusReasonBuildPodExists indicates that the build tried to create a
 	// build pod but one was already present.
 	StatusReasonBuildPodExists StatusReason = "BuildPodExists"
+
+	// StatusReasonGenericBuildFailed is the reason associated with a broad
+	// range of build failures.
+	StatusReasonGenericBuildFailed StatusReason = "GenericBuildFailed"
 )
 
 // NOTE: These messages might change.
@@ -346,6 +387,7 @@ const (
 	StatusMessageCancelledBuild            = "The build was cancelled by the user."
 	StatusMessageDockerBuildFailed         = "Docker build strategy has failed."
 	StatusMessageBuildPodExists            = "The pod for this build already exists and is older than the build."
+	StatusMessageGenericBuildFailed        = "Generic Build failure - check logs for details."
 )
 
 // BuildStatusOutput contains the status of the built image.
@@ -575,6 +617,27 @@ type CustomBuildStrategy struct {
 	BuildAPIVersion string
 }
 
+// ImageOptimizationPolicy describes what optimizations the builder can perform when building images.
+type ImageOptimizationPolicy string
+
+const (
+	// ImageOptimizationNone will generate a canonical Docker image as produced by the
+	// `docker build` command.
+	ImageOptimizationNone ImageOptimizationPolicy = "None"
+
+	// ImageOptimizationSkipLayers is an experimental policy and will avoid creating
+	// unique layers for each dockerfile line, resulting in smaller images and saving time
+	// during creation. Some Dockerfile syntax is not fully supported - content added to
+	// a VOLUME by an earlier layer may have incorrect uid, gid, and filesystem permissions.
+	// If an unsupported setting is detected, the build will fail.
+	ImageOptimizationSkipLayers ImageOptimizationPolicy = "SkipLayers"
+
+	// ImageOptimizationSkipLayersAndWarn is the same as SkipLayers, but will only
+	// warn to the build output instead of failing when unsupported syntax is detected. This
+	// policy is experimental.
+	ImageOptimizationSkipLayersAndWarn ImageOptimizationPolicy = "SkipLayersAndWarn"
+)
+
 // DockerBuildStrategy defines input parameters specific to Docker build.
 type DockerBuildStrategy struct {
 	// From is reference to an DockerImage, ImageStream, ImageStreamTag, or ImageStreamImage from which
@@ -605,6 +668,15 @@ type DockerBuildStrategy struct {
 	// DockerfilePath is the path of the Dockerfile that will be used to build the Docker image,
 	// relative to the root of the context (contextDir).
 	DockerfilePath string
+
+	// ImageOptimizationPolicy describes what optimizations the system can use when building images
+	// to reduce the final size or time spent building the image. The default policy is 'None' which
+	// means the final build image will be equivalent to an image created by the Docker build API.
+	// The experimental policy 'SkipLayerCache' will avoid commiting new layers in between each
+	// image step, and will fail if the Dockerfile cannot provide compatibility with the 'None'
+	// policy. An additional experimental policy 'SkipLayerCacheAndWarn' is the same as
+	// 'SkipLayerCache' but simply warns if compatibility cannot be preserved.
+	ImageOptimizationPolicy *ImageOptimizationPolicy
 }
 
 // SourceBuildStrategy defines input parameters specific to an Source build.
@@ -868,6 +940,13 @@ type BuildTriggerPolicy struct {
 
 	// ImageChange contains parameters for an ImageChange type of trigger
 	ImageChange *ImageChangeTrigger
+
+	// GitLabWebHook contains the parameters for a GitLab webhook type of trigger
+	GitLabWebHook *WebHookTrigger
+
+	// BitbucketWebHook contains the parameters for a Bitbucket webhook type of
+	// trigger
+	BitbucketWebHook *WebHookTrigger
 }
 
 // BuildTriggerType refers to a specific BuildTriggerPolicy implementation.
@@ -879,6 +958,8 @@ var KnownTriggerTypes = sets.NewString(
 	string(GenericWebHookBuildTriggerType),
 	string(ImageChangeBuildTriggerType),
 	string(ConfigChangeBuildTriggerType),
+	string(GitLabWebHookBuildTriggerType),
+	string(BitbucketWebHookBuildTriggerType),
 )
 
 const (
@@ -891,6 +972,14 @@ const (
 	// generic webhook invocations
 	GenericWebHookBuildTriggerType           BuildTriggerType = "Generic"
 	GenericWebHookBuildTriggerTypeDeprecated BuildTriggerType = "generic"
+
+	// GitLabWebHookBuildTriggerType represents a trigger that launches builds on
+	// GitLab webhook invocations
+	GitLabWebHookBuildTriggerType BuildTriggerType = "GitLab"
+
+	// BitbucketWebHookBuildTriggerType represents a trigger that launches builds on
+	// Bitbucket webhook invocations
+	BitbucketWebHookBuildTriggerType BuildTriggerType = "Bitbucket"
 
 	// ImageChangeBuildTriggerType represents a trigger that launches builds on
 	// availability of a new version of an image

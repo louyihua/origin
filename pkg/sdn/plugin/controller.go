@@ -261,7 +261,7 @@ func (plugin *OsdnNode) SetupSDN() (bool, error) {
 	// eg, "table=10, priority=100, tun_src=${remote_node_ip}, actions=goto_table:30"
 	otx.AddFlow("table=10, priority=0, actions=drop")
 
-	// Table 20: from OpenShift container; validate IP/MAC, assign tenant-id; filled in by openshift-sdn-ovs
+	// Table 20: from OpenShift container; validate IP/MAC, assign tenant-id; filled in by setupPodFlows
 	// eg, "table=20, priority=100, in_port=${ovs_port}, arp, nw_src=${ipaddr}, arp_sha=${macaddr}, actions=load:${tenant_id}->NXM_NX_REG0[], goto_table:21"
 	//     "table=20, priority=100, in_port=${ovs_port}, ip, nw_src=${ipaddr}, actions=load:${tenant_id}->NXM_NX_REG0[], goto_table:21"
 	// (${tenant_id} is always 0 for single-tenant)
@@ -287,7 +287,7 @@ func (plugin *OsdnNode) SetupSDN() (bool, error) {
 	otx.AddFlow("table=30, priority=0, ip, actions=goto_table:100")
 	otx.AddFlow("table=30, priority=0, arp, actions=drop")
 
-	// Table 40: ARP to local container, filled in by openshift-sdn-ovs
+	// Table 40: ARP to local container, filled in by setupPodFlows
 	// eg, "table=40, priority=100, arp, nw_dst=${container_ip}, actions=output:${ovs_port}"
 	otx.AddFlow("table=40, priority=0, actions=drop")
 
@@ -300,7 +300,7 @@ func (plugin *OsdnNode) SetupSDN() (bool, error) {
 	// eg, "table=60, priority=100, reg0=${tenant_id}, ${service_proto}, nw_dst=${service_ip}, tp_dst=${service_port}, actions=load:${tenant_id}->NXM_NX_REG1[], load:2->NXM_NX_REG2[], goto_table:80"
 	otx.AddFlow("table=60, priority=0, actions=drop")
 
-	// Table 70: IP to local container: vnid/port mappings; filled in by openshift-sdn-ovs
+	// Table 70: IP to local container: vnid/port mappings; filled in by setupPodFlows
 	// eg, "table=70, priority=100, ip, nw_dst=${ipaddr}, actions=load:${tenant_id}->NXM_NX_REG1[], load:${ovs_port}->NXM_NX_REG2[], goto_table:80"
 	otx.AddFlow("table=70, priority=0, actions=drop")
 
@@ -388,10 +388,15 @@ func (plugin *OsdnNode) updateEgressNetworkPolicyRules(vnid uint32) {
 	} else if vnid == 0 {
 		glog.Errorf("EgressNetworkPolicy in global network namespace is not allowed (%s); ignoring", policyNames(policies))
 	} else if len(namespaces) > 1 {
+		// Rationale: In our current implementation, multiple namespaces share their network by using the same VNID.
+		// Even though Egress network policy is defined per namespace, its implementation is based on VNIDs.
+		// So in case of shared network namespaces, egress policy of one namespace will affect all other namespaces that are sharing the network which might not be desirable.
 		glog.Errorf("EgressNetworkPolicy not allowed in shared NetNamespace (%s); dropping all traffic", strings.Join(namespaces, ", "))
 		otx.DeleteFlows("table=100, reg0=%d", vnid)
 		otx.AddFlow("table=100, reg0=%d, priority=1, actions=drop", vnid)
 	} else if len(policies) > 1 {
+		// Rationale: If we have allowed more than one policy, we could end up with different network restrictions depending
+		// on the order of policies that were processed and also it doesn't give more expressive power than a single policy.
 		glog.Errorf("multiple EgressNetworkPolicies in same network namespace (%s) is not allowed; dropping all traffic", policyNames(policies))
 		otx.DeleteFlows("table=100, reg0=%d", vnid)
 		otx.AddFlow("table=100, reg0=%d, priority=1, actions=drop", vnid)

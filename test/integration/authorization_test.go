@@ -123,16 +123,20 @@ func TestClusterReaderCoverage(t *testing.T) {
 	}
 
 	escalatingResources := map[unversioned.GroupResource]bool{
-		oauthapi.Resource("oauthauthorizetokens"): true,
-		oauthapi.Resource("oauthaccesstokens"):    true,
-		oauthapi.Resource("oauthclients"):         true,
-		imageapi.Resource("imagestreams/secrets"): true,
-		kapi.Resource("secrets"):                  true,
-		kapi.Resource("pods/exec"):                true,
-		kapi.Resource("pods/proxy"):               true,
-		kapi.Resource("pods/portforward"):         true,
-		kapi.Resource("nodes/proxy"):              true,
-		kapi.Resource("services/proxy"):           true,
+		oauthapi.Resource("oauthauthorizetokens"):       true,
+		oauthapi.LegacyResource("oauthauthorizetokens"): true,
+		oauthapi.Resource("oauthaccesstokens"):          true,
+		oauthapi.LegacyResource("oauthaccesstokens"):    true,
+		oauthapi.Resource("oauthclients"):               true,
+		oauthapi.LegacyResource("oauthclients"):         true,
+		imageapi.Resource("imagestreams/secrets"):       true,
+		imageapi.LegacyResource("imagestreams/secrets"): true,
+		kapi.Resource("secrets"):                        true,
+		kapi.Resource("pods/exec"):                      true,
+		kapi.Resource("pods/proxy"):                     true,
+		kapi.Resource("pods/portforward"):               true,
+		kapi.Resource("nodes/proxy"):                    true,
+		kapi.Resource("services/proxy"):                 true,
 	}
 
 	readerRole, err := clusterAdminClient.ClusterRoles().Get(bootstrappolicy.ClusterReaderRoleName)
@@ -158,12 +162,27 @@ func TestClusterReaderCoverage(t *testing.T) {
 
 	// remove resources without read APIs
 	nonreadingResources := []unversioned.GroupResource{
-		buildapi.Resource("buildconfigs/instantiatebinary"), buildapi.Resource("buildconfigs/instantiate"), buildapi.Resource("builds/clone"),
-		deployapi.Resource("deploymentconfigrollbacks"), deployapi.Resource("generatedeploymentconfigs"),
-		deployapi.Resource("deploymentconfigs/rollback"), deployapi.Resource("deploymentconfigs/instantiate"),
-		imageapi.Resource("imagestreamimports"), imageapi.Resource("imagestreammappings"),
+		buildapi.Resource("buildconfigs/instantiatebinary"),
+		buildapi.LegacyResource("buildconfigs/instantiatebinary"),
+		buildapi.Resource("buildconfigs/instantiate"),
+		buildapi.LegacyResource("buildconfigs/instantiate"),
+		buildapi.Resource("builds/clone"),
+		buildapi.LegacyResource("builds/clone"),
+		deployapi.Resource("deploymentconfigrollbacks"),
+		deployapi.LegacyResource("deploymentconfigrollbacks"),
+		deployapi.Resource("generatedeploymentconfigs"),
+		deployapi.LegacyResource("generatedeploymentconfigs"),
+		deployapi.Resource("deploymentconfigs/rollback"),
+		deployapi.LegacyResource("deploymentconfigs/rollback"),
+		deployapi.Resource("deploymentconfigs/instantiate"),
+		deployapi.LegacyResource("deploymentconfigs/instantiate"),
+		imageapi.Resource("imagestreamimports"),
+		imageapi.LegacyResource("imagestreamimports"),
+		imageapi.Resource("imagestreammappings"),
+		imageapi.LegacyResource("imagestreammappings"),
 		extensionsapi.Resource("deployments/rollback"),
-		kapi.Resource("pods/attach"), kapi.Resource("namespaces/finalize"),
+		kapi.Resource("pods/attach"),
+		kapi.Resource("namespaces/finalize"),
 	}
 	for _, resource := range nonreadingResources {
 		delete(allResources, resource)
@@ -445,10 +464,21 @@ func (test localResourceAccessReviewTest) run(t *testing.T) {
 			}
 		}
 
-		if actualResponse.Namespace != test.response.Namespace ||
-			!reflect.DeepEqual(actualResponse.Users.List(), test.response.Users.List()) ||
-			!reflect.DeepEqual(actualResponse.Groups.List(), test.response.Groups.List()) ||
-			actualResponse.EvaluationError != test.response.EvaluationError {
+		if actualResponse.Namespace != test.response.Namespace {
+			failMessage = fmt.Sprintf("%s\n: namespaces does not match (%s!=%s)", test.description, actualResponse.Namespace, test.response.Namespace)
+			return false, nil
+		}
+		if actualResponse.EvaluationError != test.response.EvaluationError {
+			failMessage = fmt.Sprintf("%s\n: evaluation errors does not match (%s!=%s)", test.description, actualResponse.EvaluationError, test.response.EvaluationError)
+			return false, nil
+		}
+
+		if !reflect.DeepEqual(actualResponse.Users.List(), test.response.Users.List()) {
+			failMessage = fmt.Sprintf("%s:\n  %s:\n  expected %s\n  got %s", test.description, prettyPrintAction(&test.review.Action, "(in the current namespace)"), prettyPrintReviewResponse(&test.response), prettyPrintReviewResponse(actualResponse))
+			return false, nil
+		}
+
+		if !reflect.DeepEqual(actualResponse.Groups.List(), test.response.Groups.List()) {
 			failMessage = fmt.Sprintf("%s:\n  %s:\n  expected %s\n  got %s", test.description, prettyPrintAction(&test.review.Action, "(in the current namespace)"), prettyPrintReviewResponse(&test.response), prettyPrintReviewResponse(actualResponse))
 			return false, nil
 		}
@@ -515,11 +545,11 @@ func TestAuthorizationResourceAccessReview(t *testing.T) {
 	}
 
 	requestWhoCanViewDeploymentConfigs := &authorizationapi.ResourceAccessReview{
-		Action: authorizationapi.Action{Verb: "get", Resource: "deploymentconfigs"},
+		Action: authorizationapi.Action{Verb: "get", Resource: "deploymentconfigs", Group: ""},
 	}
 
 	localRequestWhoCanViewDeploymentConfigs := &authorizationapi.LocalResourceAccessReview{
-		Action: authorizationapi.Action{Verb: "get", Resource: "deploymentconfigs"},
+		Action: authorizationapi.Action{Verb: "get", Resource: "deploymentconfigs", Group: ""},
 	}
 
 	{
@@ -595,7 +625,7 @@ func TestAuthorizationResourceAccessReview(t *testing.T) {
 				Users:           sets.NewString("edgar"),
 				Groups:          sets.NewString(),
 				Namespace:       "mallet-project",
-				EvaluationError: `role "admin" not found`,
+				EvaluationError: `role.authorization.openshift.io "admin" not found`,
 			},
 		}
 		test.response.Users.Insert(globalClusterReaderUsers.List()...)
@@ -873,7 +903,7 @@ func TestAuthorizationSubjectAccessReviewAPIGroup(t *testing.T) {
 		kubeAuthInterface: clusterAdminKubeClient.Authorization(),
 		response: authorizationapi.SubjectAccessReviewResponse{
 			Allowed:   false,
-			Reason:    `User "harold" cannot get foo.horizontalpodautoscalers in project "hammer-project"`,
+			Reason:    `User "harold" cannot get horizontalpodautoscalers.foo in project "hammer-project"`,
 			Namespace: "hammer-project",
 		},
 	}.run(t)
@@ -887,7 +917,7 @@ func TestAuthorizationSubjectAccessReviewAPIGroup(t *testing.T) {
 		kubeAuthInterface: clusterAdminSARGetter,
 		response: authorizationapi.SubjectAccessReviewResponse{
 			Allowed:   false,
-			Reason:    `User "harold" cannot get *.horizontalpodautoscalers in project "hammer-project"`,
+			Reason:    `User "harold" cannot get horizontalpodautoscalers.* in project "hammer-project"`,
 			Namespace: "hammer-project",
 		},
 	}.run(t)
@@ -1064,7 +1094,7 @@ func TestAuthorizationSubjectAccessReview(t *testing.T) {
 		clusterReview:     askCanDannyGetProject,
 		kubeAuthInterface: dannySARGetter,
 		err:               `User "danny" cannot create subjectaccessreviews at the cluster scope`,
-		kubeErr:           `User "danny" cannot create authorization.k8s.io.subjectaccessreviews at the cluster scope`,
+		kubeErr:           `User "danny" cannot create subjectaccessreviews.authorization.k8s.io at the cluster scope`,
 	}.run(t)
 	subjectAccessReviewTest{
 		description:       "as anonymous, can I make cluster subject access reviews",
@@ -1072,7 +1102,7 @@ func TestAuthorizationSubjectAccessReview(t *testing.T) {
 		clusterReview:     askCanDannyGetProject,
 		kubeAuthInterface: anonymousSARGetter,
 		err:               `User "system:anonymous" cannot create subjectaccessreviews at the cluster scope`,
-		kubeErr:           `User "system:anonymous" cannot create authorization.k8s.io.subjectaccessreviews at the cluster scope`,
+		kubeErr:           `User "system:anonymous" cannot create subjectaccessreviews.authorization.k8s.io at the cluster scope`,
 	}.run(t)
 
 	addValerie := &policy.RoleModificationOptions{
@@ -1145,7 +1175,7 @@ func TestAuthorizationSubjectAccessReview(t *testing.T) {
 		kubeAuthInterface: haroldSARGetter,
 		kubeNamespace:     "mallet-project",
 		err:               `User "harold" cannot create localsubjectaccessreviews in project "mallet-project"`,
-		kubeErr:           `User "harold" cannot create authorization.k8s.io.localsubjectaccessreviews in project "mallet-project"`,
+		kubeErr:           `User "harold" cannot create localsubjectaccessreviews.authorization.k8s.io in project "mallet-project"`,
 	}.run(t)
 	subjectAccessReviewTest{
 		description:       "system:anonymous denied ability to run subject access review in project mallet-project",
@@ -1154,7 +1184,7 @@ func TestAuthorizationSubjectAccessReview(t *testing.T) {
 		kubeAuthInterface: anonymousSARGetter,
 		kubeNamespace:     "mallet-project",
 		err:               `User "system:anonymous" cannot create localsubjectaccessreviews in project "mallet-project"`,
-		kubeErr:           `User "system:anonymous" cannot create authorization.k8s.io.localsubjectaccessreviews in project "mallet-project"`,
+		kubeErr:           `User "system:anonymous" cannot create localsubjectaccessreviews.authorization.k8s.io in project "mallet-project"`,
 	}.run(t)
 	// ensure message does not leak whether the namespace exists or not
 	subjectAccessReviewTest{
@@ -1164,7 +1194,7 @@ func TestAuthorizationSubjectAccessReview(t *testing.T) {
 		kubeAuthInterface: haroldSARGetter,
 		kubeNamespace:     "nonexistent-project",
 		err:               `User "harold" cannot create localsubjectaccessreviews in project "nonexistent-project"`,
-		kubeErr:           `User "harold" cannot create authorization.k8s.io.localsubjectaccessreviews in project "nonexistent-project"`,
+		kubeErr:           `User "harold" cannot create localsubjectaccessreviews.authorization.k8s.io in project "nonexistent-project"`,
 	}.run(t)
 	subjectAccessReviewTest{
 		description:       "system:anonymous denied ability to run subject access review in project nonexistent-project",
@@ -1173,7 +1203,7 @@ func TestAuthorizationSubjectAccessReview(t *testing.T) {
 		kubeAuthInterface: anonymousSARGetter,
 		kubeNamespace:     "nonexistent-project",
 		err:               `User "system:anonymous" cannot create localsubjectaccessreviews in project "nonexistent-project"`,
-		kubeErr:           `User "system:anonymous" cannot create authorization.k8s.io.localsubjectaccessreviews in project "nonexistent-project"`,
+		kubeErr:           `User "system:anonymous" cannot create localsubjectaccessreviews.authorization.k8s.io in project "nonexistent-project"`,
 	}.run(t)
 
 	askCanHaroldUpdateProject := &authorizationapi.LocalSubjectAccessReview{
@@ -1213,7 +1243,7 @@ func TestAuthorizationSubjectAccessReview(t *testing.T) {
 		clusterReview:     askCanClusterAdminsCreateProject,
 		kubeAuthInterface: haroldSARGetter,
 		err:               `User "harold" cannot create subjectaccessreviews at the cluster scope`,
-		kubeErr:           `User "harold" cannot create authorization.k8s.io.subjectaccessreviews at the cluster scope`,
+		kubeErr:           `User "harold" cannot create subjectaccessreviews.authorization.k8s.io at the cluster scope`,
 	}.run(t)
 
 	askCanICreatePods := &authorizationapi.LocalSubjectAccessReview{

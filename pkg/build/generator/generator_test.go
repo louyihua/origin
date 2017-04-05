@@ -1220,10 +1220,12 @@ func TestGenerateBuildFromBuild(t *testing.T) {
 		ObjectMeta: kapi.ObjectMeta{
 			Name: "test-build",
 			Annotations: map[string]string{
-				buildapi.BuildJenkinsStatusJSONAnnotation: "foo",
-				buildapi.BuildJenkinsLogURLAnnotation:     "bar",
-				buildapi.BuildJenkinsBuildURIAnnotation:   "baz",
-				buildapi.BuildPodNameAnnotation:           "ruby-sample-build-1-build",
+				buildapi.BuildJenkinsStatusJSONAnnotation:      "foo",
+				buildapi.BuildJenkinsLogURLAnnotation:          "bar",
+				buildapi.BuildJenkinsConsoleLogURLAnnotation:   "bar",
+				buildapi.BuildJenkinsBlueOceanLogURLAnnotation: "bar",
+				buildapi.BuildJenkinsBuildURIAnnotation:        "baz",
+				buildapi.BuildPodNameAnnotation:                "ruby-sample-build-1-build",
 			},
 			OwnerReferences: []kapi.OwnerReference{
 				{
@@ -1260,6 +1262,12 @@ func TestGenerateBuildFromBuild(t *testing.T) {
 	}
 	if _, ok := newBuild.ObjectMeta.Annotations[buildapi.BuildJenkinsLogURLAnnotation]; ok {
 		t.Errorf("%s annotation exists, expected it not to", buildapi.BuildJenkinsLogURLAnnotation)
+	}
+	if _, ok := newBuild.ObjectMeta.Annotations[buildapi.BuildJenkinsConsoleLogURLAnnotation]; ok {
+		t.Errorf("%s annotation exists, expected it not to", buildapi.BuildJenkinsConsoleLogURLAnnotation)
+	}
+	if _, ok := newBuild.ObjectMeta.Annotations[buildapi.BuildJenkinsBlueOceanLogURLAnnotation]; ok {
+		t.Errorf("%s annotation exists, expected it not to", buildapi.BuildJenkinsBlueOceanLogURLAnnotation)
 	}
 	if _, ok := newBuild.ObjectMeta.Annotations[buildapi.BuildJenkinsBuildURIAnnotation]; ok {
 		t.Errorf("%s annotation exists, expected it not to", buildapi.BuildJenkinsBuildURIAnnotation)
@@ -1968,7 +1976,7 @@ func TestInstantiateBuildTriggerCauseGitHubWebHook(t *testing.T) {
 		TriggeredBy: append(buildTriggerCauses,
 			buildapi.BuildTriggerCause{
 				Message: changeMessage,
-				GenericWebHook: &buildapi.GenericWebHookCause{
+				GitHubWebHook: &buildapi.GitHubWebHookCause{
 					Secret:   webHookSecret,
 					Revision: gitRevision,
 				},
@@ -1985,10 +1993,104 @@ func TestInstantiateBuildTriggerCauseGitHubWebHook(t *testing.T) {
 		if cause.Message != changeMessage {
 			t.Errorf("Expected reason %s, got %s", changeMessage, cause.Message)
 		}
-		if cause.GenericWebHook.Secret != webHookSecret {
-			t.Errorf("Expected WebHook secret %s, got %s", webHookSecret, cause.GenericWebHook.Secret)
+		if cause.GitHubWebHook.Secret != webHookSecret {
+			t.Errorf("Expected WebHook secret %s, got %s", webHookSecret, cause.GitHubWebHook.Secret)
 		}
-		if !reflect.DeepEqual(gitRevision, cause.GenericWebHook.Revision) {
+		if !reflect.DeepEqual(gitRevision, cause.GitHubWebHook.Revision) {
+			t.Errorf("Expected return revision to match")
+		}
+	}
+}
+
+func TestInstantiateBuildTriggerCauseGitLabWebHook(t *testing.T) {
+	buildTriggerCauses := []buildapi.BuildTriggerCause{}
+	changeMessage := buildapi.BuildTriggerCauseGitLabMsg
+	webHookSecret := "testsecret"
+
+	gitRevision := &buildapi.SourceRevision{
+		Git: &buildapi.GitSourceRevision{
+			Author: buildapi.SourceControlUser{
+				Name:  "John Doe",
+				Email: "johndoe@test.com",
+			},
+			Message: "A random act of kindness",
+		},
+	}
+
+	buildRequest := &buildapi.BuildRequest{
+		TriggeredBy: append(buildTriggerCauses,
+			buildapi.BuildTriggerCause{
+				Message: changeMessage,
+				GitLabWebHook: &buildapi.GitLabWebHookCause{
+					CommonWebHookCause: buildapi.CommonWebHookCause{
+						Revision: gitRevision,
+						Secret:   webHookSecret,
+					},
+				},
+			},
+		),
+	}
+
+	generator := mockBuildGenerator()
+	buildObject, err := generator.Instantiate(kapi.NewDefaultContext(), buildRequest)
+	if err != nil {
+		t.Errorf("Expected error to be nil, got %v", err)
+	}
+	for _, cause := range buildObject.Spec.TriggeredBy {
+		if cause.Message != changeMessage {
+			t.Errorf("Expected reason %s, got %s", changeMessage, cause.Message)
+		}
+		if cause.GitLabWebHook.Secret != webHookSecret {
+			t.Errorf("Expected WebHook secret %s, got %s", webHookSecret, cause.GitLabWebHook.Secret)
+		}
+		if !reflect.DeepEqual(gitRevision, cause.GitLabWebHook.Revision) {
+			t.Errorf("Expected return revision to match")
+		}
+	}
+}
+
+func TestInstantiateBuildTriggerCauseBitbucketWebHook(t *testing.T) {
+	buildTriggerCauses := []buildapi.BuildTriggerCause{}
+	changeMessage := buildapi.BuildTriggerCauseBitbucketMsg
+	webHookSecret := "testsecret"
+
+	gitRevision := &buildapi.SourceRevision{
+		Git: &buildapi.GitSourceRevision{
+			Author: buildapi.SourceControlUser{
+				Name:  "John Doe",
+				Email: "johndoe@test.com",
+			},
+			Message: "A random act of kindness",
+		},
+	}
+
+	buildRequest := &buildapi.BuildRequest{
+		TriggeredBy: append(buildTriggerCauses,
+			buildapi.BuildTriggerCause{
+				Message: changeMessage,
+				BitbucketWebHook: &buildapi.BitbucketWebHookCause{
+					CommonWebHookCause: buildapi.CommonWebHookCause{
+						Secret:   webHookSecret,
+						Revision: gitRevision,
+					},
+				},
+			},
+		),
+	}
+
+	generator := mockBuildGenerator()
+	buildObject, err := generator.Instantiate(kapi.NewDefaultContext(), buildRequest)
+	if err != nil {
+		t.Errorf("Expected error to be nil, got %v", err)
+	}
+	for _, cause := range buildObject.Spec.TriggeredBy {
+		if cause.Message != changeMessage {
+			t.Errorf("Expected reason %s, got %s", changeMessage, cause.Message)
+		}
+		if cause.BitbucketWebHook.Secret != webHookSecret {
+			t.Errorf("Expected WebHook secret %s, got %s", webHookSecret, cause.BitbucketWebHook.Secret)
+		}
+		if !reflect.DeepEqual(gitRevision, cause.BitbucketWebHook.Revision) {
 			t.Errorf("Expected return revision to match")
 		}
 	}

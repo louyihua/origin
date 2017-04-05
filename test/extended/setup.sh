@@ -24,26 +24,37 @@ function os::test::extended::setup () {
 	# build binaries
 	os::util::ensure::built_binary_exists 'ginkgo' 'vendor/github.com/onsi/ginkgo/ginkgo'
 	os::util::ensure::built_binary_exists 'extended.test' 'test/extended/extended.test'
-	os::util::ensure::built_binary_exists 'openshift'
 	os::util::ensure::built_binary_exists 'oadm'
 	os::util::ensure::built_binary_exists 'oc'
 	os::util::ensure::built_binary_exists 'junitmerge'
 
 	# ensure proper relative directories are set
-	export EXTENDED_TEST_PATH="${OS_ROOT}/test/extended"
 	export KUBE_REPO_ROOT="${OS_ROOT}/vendor/k8s.io/kubernetes"
 
 	os::util::environment::setup_time_vars
-	os::util::environment::use_sudo
-	os::util::environment::setup_all_server_vars "test-extended/core"
-
-	os::util::ensure::iptables_privileges_exist
 
 	# Allow setting $JUNIT_REPORT to toggle output behavior
 	if [[ -n "${JUNIT_REPORT:-}" ]]; then
 		export JUNIT_REPORT_OUTPUT="${LOG_DIR}/raw_test_output.log"
 		# the Ginkgo tests also generate jUnit but expect different envars
 		export TEST_REPORT_DIR="${ARTIFACT_DIR}"
+	fi
+
+	# TODO: we shouldn't have to do this much work just to get tests to run against a real
+	#   cluster, until then
+	if [[ -n "${TEST_ONLY-}" ]]; then
+		function cleanup() {
+			out=$?
+			os::cleanup::dump_container_logs
+			os::test::junit::generate_oscmd_report
+			os::log::info "Exiting"
+			return $out
+		}
+		trap "exit" INT TERM
+		trap "cleanup" EXIT
+
+		os::log::info "Not starting server"
+		return 0
 	fi
 
 	function cleanup() {
@@ -59,13 +70,12 @@ function os::test::extended::setup () {
 	trap "exit" INT TERM
 	trap "cleanup" EXIT
 
-	# allow setup to be skipped
-	if [[ -n "${TEST_ONLY+x}" ]]; then
-		export SKIP_TEARDOWN='true'
-		# be sure to set VOLUME_DIR if you are running with TEST_ONLY
-		os::log::info "Not starting server, VOLUME_DIR=${VOLUME_DIR:-}"
-		return 0
-	fi
+	os::util::ensure::built_binary_exists 'openshift'
+
+	os::util::environment::use_sudo
+	os::cleanup::tmpdir
+	os::util::environment::setup_all_server_vars
+	os::util::ensure::iptables_privileges_exist
 
 	os::log::info "Starting server"
 
@@ -111,6 +121,9 @@ function os::test::extended::setup () {
 	cp "${SERVER_CONFIG_DIR}/master/master-config.yaml" "${SERVER_CONFIG_DIR}/master/master-config.orig2.yaml"
 	openshift ex config patch "${SERVER_CONFIG_DIR}/master/master-config.orig2.yaml" --patch="{\"auditConfig\": {\"enabled\": true}}"  > "${SERVER_CONFIG_DIR}/master/master-config.yaml"
 
+	cp "${SERVER_CONFIG_DIR}/master/master-config.yaml" "${SERVER_CONFIG_DIR}/master/master-config.orig2.yaml"
+	openshift ex config patch "${SERVER_CONFIG_DIR}/master/master-config.orig2.yaml" --patch="{\"enableTemplateServiceBroker\": true}"  > "${SERVER_CONFIG_DIR}/master/master-config.yaml"
+
 	# If the XFS volume dir mount point exists enable local storage quota in node-config.yaml so these tests can pass:
 	if [[ -n "${LOCAL_STORAGE_QUOTA}" ]]; then
 		# The ec2 images usually have ~5Gi of space defined for the xfs vol for the registry; want to give /registry a good chunk of that
@@ -137,6 +150,9 @@ function os::test::extended::setup () {
 
 	os::log::info "Creating image streams"
 	oc create -n openshift -f "${OS_ROOT}/examples/image-streams/image-streams-centos7.json" --config="${ADMIN_KUBECONFIG}"
+
+	os::log::info "Creating quickstart templates"
+	oc create -n openshift -f "${OS_ROOT}/examples/quickstarts" --config="${ADMIN_KUBECONFIG}"
 }
 
 # Run extended tests or print out a list of tests that need to be run

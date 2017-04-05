@@ -17,6 +17,7 @@ type ImageList struct {
 }
 
 // +genclient=true
+// +nonNamespaced=true
 
 // Image is an immutable representation of a Docker image and metadata at a point in time.
 type Image struct {
@@ -393,6 +394,8 @@ type RepositoryImportSpec struct {
 
 	// ImportPolicy is the policy controlling how the image is imported
 	ImportPolicy TagImportPolicy `json:"importPolicy,omitempty" protobuf:"bytes,2,opt,name=importPolicy"`
+	// ReferencePolicy defines how other components should consume the image
+	ReferencePolicy TagReferencePolicy `json:"referencePolicy,omitempty" protobuf:"bytes,4,opt,name=referencePolicy"`
 	// IncludeManifest determines if the manifest for each image is returned in the response
 	IncludeManifest bool `json:"includeManifest,omitempty" protobuf:"varint,3,opt,name=includeManifest"`
 }
@@ -417,6 +420,8 @@ type ImageImportSpec struct {
 
 	// ImportPolicy is the policy controlling how the image is imported
 	ImportPolicy TagImportPolicy `json:"importPolicy,omitempty" protobuf:"bytes,3,opt,name=importPolicy"`
+	// ReferencePolicy defines how other components should consume the image
+	ReferencePolicy TagReferencePolicy `json:"referencePolicy,omitempty" protobuf:"bytes,5,opt,name=referencePolicy"`
 	// IncludeManifest determines if the manifest for each image is returned in the response
 	IncludeManifest bool `json:"includeManifest,omitempty" protobuf:"varint,4,opt,name=includeManifest"`
 }

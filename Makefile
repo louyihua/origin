@@ -3,7 +3,7 @@
 # Targets (see each target for more information):
 #   all: Build code.
 #   build: Build code.
-#   check: Run unit tests.
+#   check: Run verify, build, unit tests and cmd tests.
 #   test: Run all tests.
 #   run: Run all-in-one server
 #   clean: Clean up.
@@ -77,7 +77,7 @@ verify: build
 	{ \
 	hack/verify-gofmt.sh ||r=1;\
 	hack/verify-govet.sh ||r=1;\
-	hack/verify-generated-bootstrap-bindata.sh ||r=1;\
+	hack/verify-generated-bindata.sh ||r=1;\
 	hack/verify-generated-deep-copies.sh ||r=1;\
 	hack/verify-generated-conversions.sh ||r=1;\
 	hack/verify-generated-clientsets.sh ||r=1;\
@@ -107,7 +107,7 @@ verify-commits:
 # Example:
 #   make update
 update: build
-	hack/update-generated-bootstrap-bindata.sh
+	hack/update-generated-bindata.sh
 	hack/update-generated-deep-copies.sh
 	hack/update-generated-conversions.sh
 	hack/update-generated-clientsets.sh

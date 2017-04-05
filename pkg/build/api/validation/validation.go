@@ -82,7 +82,7 @@ func ValidateBuildUpdate(build *buildapi.Build, older *buildapi.Build) field.Err
 }
 
 func diffBuildSpec(newer buildapi.BuildSpec, older buildapi.BuildSpec) (string, error) {
-	codec := kapi.Codecs.LegacyCodec(v1.SchemeGroupVersion)
+	codec := kapi.Codecs.LegacyCodec(v1.LegacySchemeGroupVersion)
 	newerObj := &buildapi.Build{Spec: newer}
 	olderObj := &buildapi.Build{Spec: older}
 
@@ -485,6 +485,14 @@ func validateDockerStrategy(strategy *buildapi.DockerBuildStrategy, fldPath *fie
 
 	allErrs = append(allErrs, validateSecretRef(strategy.PullSecret, fldPath.Child("pullSecret"))...)
 
+	switch t := strategy.ImageOptimizationPolicy; {
+	case t == nil:
+	case *t == buildapi.ImageOptimizationSkipLayers, *t == buildapi.ImageOptimizationSkipLayersAndWarn,
+		*t == buildapi.ImageOptimizationNone:
+	default:
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("imageOptimizationPolicy"), *t, "must be unset, 'None', 'SkipLayers', or 'SkipLayersAndWarn"))
+	}
+
 	if len(strategy.DockerfilePath) != 0 {
 		cleaned, errs := validateRelativePath(strategy.DockerfilePath, "dockerfilePath", fldPath.Child("dockerfilePath"))
 		allErrs = append(allErrs, errs...)
@@ -567,6 +575,18 @@ func validateTrigger(trigger *buildapi.BuildTriggerPolicy, buildFrom *kapi.Objec
 			allErrs = append(allErrs, field.Required(fldPath.Child("github"), ""))
 		} else {
 			allErrs = append(allErrs, validateWebHook(trigger.GitHubWebHook, fldPath.Child("github"), false)...)
+		}
+	case buildapi.GitLabWebHookBuildTriggerType:
+		if trigger.GitLabWebHook == nil {
+			allErrs = append(allErrs, field.Required(fldPath.Child("gitlab"), ""))
+		} else {
+			allErrs = append(allErrs, validateWebHook(trigger.GitLabWebHook, fldPath.Child("gitlab"), false)...)
+		}
+	case buildapi.BitbucketWebHookBuildTriggerType:
+		if trigger.BitbucketWebHook == nil {
+			allErrs = append(allErrs, field.Required(fldPath.Child("bitbucket"), ""))
+		} else {
+			allErrs = append(allErrs, validateWebHook(trigger.BitbucketWebHook, fldPath.Child("bitbucket"), false)...)
 		}
 	case buildapi.GenericWebHookBuildTriggerType:
 		if trigger.GenericWebHook == nil {

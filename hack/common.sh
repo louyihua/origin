@@ -46,6 +46,18 @@ function os::build::host_platform_friendly() {
 }
 readonly -f os::build::host_platform_friendly
 
+# This converts from platform/arch to PLATFORM_ARCH, host platform will be
+# considered if no parameter passed
+function os::build::platform_arch() {
+  local platform=${1:-}
+  if [[ -z "${platform}" ]]; then
+    platform=$(os::build::host_platform)
+  fi
+
+  echo $(echo ${platform} | tr '[:lower:]/' '[:upper:]_')
+}
+readonly -f os::build::platform_arch
+
 # os::build::setup_env will check that the `go` commands is available in
 # ${PATH}. If not running on Travis, it will also check that the Go version is
 # good enough for the Kubernetes build.
@@ -205,7 +217,7 @@ os::build::internal::build_binaries() {
 
     local host_platform=$(os::build::host_platform)
     local platform
-    for platform in "${platforms[@]}"; do
+    for platform in "${platforms[@]+"${platforms[@]}"}"; do
       echo "++ Building go targets for ${platform}:" "${targets[@]}"
       mkdir -p "${OS_OUTPUT_BINPATH}/${platform}"
 
@@ -216,8 +228,8 @@ os::build::internal::build_binaries() {
         unset GOBIN
       fi
 
-      local platform_gotags_envvar=OS_GOFLAGS_TAGS_$(echo ${platform} | tr '[:lower:]/' '[:upper:]_')
-      local platform_gotags_test_envvar=OS_GOFLAGS_TAGS_TEST_$(echo ${platform} | tr '[:lower:]/' '[:upper:]_')
+      local platform_gotags_envvar=OS_GOFLAGS_TAGS_$(os::build::platform_arch ${platform})
+      local platform_gotags_test_envvar=OS_GOFLAGS_TAGS_TEST_$(os::build::platform_arch ${platform})
 
       if [[ ${#nonstatics[@]} -gt 0 ]]; then
         GOOS=${platform%/*} GOARCH=${platform##*/} go install \
@@ -294,7 +306,7 @@ function os::build::place_bins() {
     fi
 
     os::build::export_targets "$@"
-    for platform in "${platforms[@]}"; do
+    for platform in "${platforms[@]+"${platforms[@]}"}"; do
       # The substitution on platform_src below will replace all slashes with
       # underscores.  It'll transform darwin/amd64 -> darwin_amd64.
       local platform_src="/${platform//\//_}"
@@ -726,16 +738,20 @@ function os::build::image() {
   local directory=$1
   local tag=$2
   local dockerfile="${3-}"
+  local extra_tag="${4-}"
   local options="${OS_BUILD_IMAGE_ARGS-}"
   local mode="${OS_BUILD_IMAGE_TYPE:-imagebuilder}"
 
   if [[ "${mode}" == "imagebuilder" ]]; then
     if os::util::find::system_binary 'imagebuilder'; then
+      if [[ -n "${extra_tag}" ]]; then
+        extra_tag="-t '${extra_tag}'"
+      fi
       if [[ -n "${dockerfile}" ]]; then
-        eval "imagebuilder -f '${dockerfile}' -t '${tag}' ${options} '${directory}'"
+        eval "imagebuilder -f '${dockerfile}' -t '${tag}' ${extra_tag} ${options} '${directory}'"
         return $?
       fi
-      eval "imagebuilder -t '${tag}' ${options} '${directory}'"
+      eval "imagebuilder -t '${tag}' ${extra_tag} ${options} '${directory}'"
       return $?
     fi
 
@@ -746,9 +762,15 @@ function os::build::image() {
 
   if [[ -n "${dockerfile}" ]]; then
     eval "docker build -f '${dockerfile}' -t '${tag}' ${options} '${directory}'"
+    if [[ -n "${extra_tag}" ]]; then
+      docker tag "${tag}" "${extra_tag}"
+    fi
     return $?
   fi
   eval "docker build -t '${tag}' ${options} '${directory}'"
+  if [[ -n "${extra_tag}" ]]; then
+    docker tag "${tag}" "${extra_tag}"
+  fi
   return $?
 }
 readonly -f os::build::image

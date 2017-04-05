@@ -8,16 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	log "github.com/Sirupsen/logrus"
-
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/configuration"
 	"github.com/docker/distribution/context"
 	"github.com/docker/distribution/digest"
 	"github.com/docker/distribution/registry/handlers"
 	_ "github.com/docker/distribution/registry/storage/driver/inmemory"
-
-	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
 
 	"github.com/openshift/origin/pkg/client/testclient"
 	registrytest "github.com/openshift/origin/pkg/dockerregistry/testutil"
@@ -41,6 +37,11 @@ func createTestRegistryServer(t *testing.T, ctx context.Context) *httptest.Serve
 			"delete": configuration.Parameters{
 				"enabled": true,
 			},
+			"maintenance": configuration.Parameters{
+				"uploadpurging": map[interface{}]interface{}{
+					"enabled": false,
+				},
+			},
 		},
 	})
 
@@ -60,17 +61,6 @@ func TestPullthroughManifests(t *testing.T) {
 	repo := "zapp"
 	repoName := fmt.Sprintf("%s/%s", namespace, repo)
 	tag := "latest"
-
-	log.SetLevel(log.DebugLevel)
-	client := &testclient.Fake{}
-
-	// TODO: get rid of those nasty global vars
-	backupRegistryClient := DefaultRegistryClient
-	DefaultRegistryClient = makeFakeRegistryClient(client, fake.NewSimpleClientset())
-	defer func() {
-		// set it back once this test finishes to make other unit tests working again
-		DefaultRegistryClient = backupRegistryClient
-	}()
 
 	installFakeAccessController(t)
 	setPassthroughBlobDescriptorServiceFactory()
@@ -100,9 +90,13 @@ func TestPullthroughManifests(t *testing.T) {
 	}
 	image.DockerImageReference = fmt.Sprintf("%s/%s/%s@%s", serverURL.Host, namespace, repo, image.Name)
 	image.DockerImageManifest = ""
-	client.AddReactor("get", "images", registrytest.GetFakeImageGetHandler(t, *image))
 
-	createTestImageStreamReactor(t, client, image, namespace, repo, tag)
+	os, client := registrytest.NewFakeOpenShiftWithClient()
+
+	err = registrytest.RegisterImage(os, image, namespace, repo, tag)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, tc := range []struct {
 		name                  string
@@ -140,15 +134,17 @@ func TestPullthroughManifests(t *testing.T) {
 	} {
 		localManifestService := newTestManifestService(repoName, tc.localData)
 
-		ctx := WithTestPassthroughToUpstream(context.Background(), false)
-
-		repo := newTestRepositoryForPullthrough(t, ctx, nil, namespace, repo, client, true)
+		repo := newTestRepository(t, namespace, repo, testRepositoryOptions{
+			client:            client,
+			enablePullThrough: true,
+		})
 
 		ptms := &pullthroughManifestService{
 			ManifestService: localManifestService,
 			repo:            repo,
 		}
 
+		ctx := WithTestPassthroughToUpstream(context.Background(), false)
 		manifestResult, err := ptms.Get(ctx, tc.manifestDigest)
 		switch err.(type) {
 		case distribution.ErrManifestUnknownRevision:
@@ -189,7 +185,6 @@ func TestPullthroughManifestInsecure(t *testing.T) {
 	repo := "zapp"
 	repoName := fmt.Sprintf("%s/%s", namespace, repo)
 
-	log.SetLevel(log.DebugLevel)
 	installFakeAccessController(t)
 	setPassthroughBlobDescriptorServiceFactory()
 
@@ -381,21 +376,16 @@ func TestPullthroughManifestInsecure(t *testing.T) {
 	} {
 		client := &testclient.Fake{}
 
-		// TODO: get rid of those nasty global vars
-		backupRegistryClient := DefaultRegistryClient
-		DefaultRegistryClient = makeFakeRegistryClient(client, fake.NewSimpleClientset())
-		defer func() {
-			// set it back once this test finishes to make other unit tests working again
-			DefaultRegistryClient = backupRegistryClient
-		}()
-
 		tc.imageStreamInit(client)
 
 		localManifestService := newTestManifestService(repoName, tc.localData)
 
 		ctx := WithTestPassthroughToUpstream(context.Background(), false)
-		repo := newTestRepositoryForPullthrough(t, ctx, nil, namespace, repo, client, true)
-		ctx = WithRepository(ctx, repo)
+		repo := newTestRepository(t, namespace, repo, testRepositoryOptions{
+			client:            client,
+			enablePullThrough: true,
+		})
+		ctx = withRepository(ctx, repo)
 
 		ptms := &pullthroughManifestService{
 			ManifestService: localManifestService,
@@ -480,7 +470,13 @@ func (t *testManifestService) Get(ctx context.Context, dgst digest.Digest, optio
 
 func (t *testManifestService) Put(ctx context.Context, manifest distribution.Manifest, options ...distribution.ManifestServiceOption) (digest.Digest, error) {
 	t.calls["Put"]++
-	return "", fmt.Errorf("method not implemented")
+	_, payload, err := manifest.Payload()
+	if err != nil {
+		return "", err
+	}
+	dgst := digest.FromBytes(payload)
+	t.data[dgst] = manifest
+	return dgst, nil
 }
 
 func (t *testManifestService) Delete(ctx context.Context, dgst digest.Digest) error {
